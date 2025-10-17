@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
+import '../utils/responsive.dart';
 
 class CalorieTrackerScreen extends StatelessWidget {
   static const routeName = '/calories';
-  const CalorieTrackerScreen({Key? key}) : super(key: key);
+  const CalorieTrackerScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Calorie Tracker')),
-      body: const Center(child: Text('Calorie Tracker (stub)')),
+      body: Padding(
+        padding: Responsive.pagePadding(context),
+        child: Center(child: Text('Calorie Tracker (stub)', style: TextStyle(fontSize: Responsive.fontSize(context, 16)))),
+      ),
     );
   }
 }
