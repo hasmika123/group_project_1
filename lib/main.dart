@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 import 'screens/home_screen.dart';
 import 'theme.dart';
+import 'screens/workout_log_screen.dart';
+import 'screens/calorie_tracker_screen.dart';
+import 'screens/progress_screen.dart';
+import 'screens/profile_screen.dart';
+import 'screens/calendar_screen.dart';
 
 void main() {
   runApp(const MyApp());
@@ -18,6 +23,13 @@ class MyApp extends StatelessWidget {
       darkTheme: AppTheme.darkTheme(),
       themeMode: ThemeMode.system,
       home: const HomeScreen(),
+      routes: {
+        WorkoutLogScreen.routeName: (ctx) => const WorkoutLogScreen(),
+        CalorieTrackerScreen.routeName: (ctx) => const CalorieTrackerScreen(),
+        ProgressScreen.routeName: (ctx) => const ProgressScreen(),
+        ProfileScreen.routeName: (ctx) => const ProfileScreen(),
+        CalendarScreen.routeName: (ctx) => const CalendarScreen(),
+      },
     );
   }
 }

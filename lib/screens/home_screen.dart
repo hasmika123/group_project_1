@@ -1,7 +1,56 @@
 import 'package:flutter/material.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  int _currentIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final titles = ['Home', 'Workouts', 'Calories'];
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(titles[_currentIndex]),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.person),
+            onPressed: () {
+              Navigator.of(context).pushNamed('/profile');
+            },
+          )
+        ],
+      ),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: [
+          const _HomeContent(),
+          const _WorkoutsTab(),
+          const _CaloriesTab(),
+        ],
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+          BottomNavigationBarItem(icon: Icon(Icons.fitness_center), label: 'Workouts'),
+          BottomNavigationBarItem(icon: Icon(Icons.restaurant), label: 'Calories'),
+        ],
+        currentIndex: _currentIndex,
+        onTap: (idx) {
+          setState(() => _currentIndex = idx);
+        },
+      ),
+    );
+  }
+}
+
+class _HomeContent extends StatelessWidget {
+  const _HomeContent({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -10,163 +59,155 @@ class HomeScreen extends StatelessWidget {
     final int caloriesBurned = 400;
     final int deficit = caloriesBurned - caloriesConsumed; // intentionally simple
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Home'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.person),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Open Profile (placeholder)')),
-              );
-            },
-          )
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Daily calorie overview
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Today',
-                      style: TextStyle(fontSize: 16, color: Colors.grey),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Calorie Deficit', style: TextStyle(fontSize: 14)),
-                            const SizedBox(height: 6),
-                            Text(
-                              '$deficit',
-                              style: TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.bold,
-                                color: deficit >= 0 ? Colors.green : Colors.red,
-                              ),
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Daily calorie overview
+          Card(
+            elevation: 2,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Today',
+                    style: TextStyle(fontSize: 16, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Calorie Deficit', style: TextStyle(fontSize: 14)),
+                          const SizedBox(height: 6),
+                          Text(
+                            '$deficit',
+                            style: TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                              color: deficit >= 0 ? Colors.green : Colors.red,
                             ),
-                          ],
-                        ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text('Consumed: $caloriesConsumed kcal'),
-                            const SizedBox(height: 6),
-                            Text('Burned: $caloriesBurned kcal'),
-                          ],
-                        )
-                      ],
-                    )
-                  ],
-                ),
+                          ),
+                        ],
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text('Consumed: $caloriesConsumed kcal'),
+                          const SizedBox(height: 6),
+                          Text('Burned: $caloriesBurned kcal'),
+                        ],
+                      )
+                    ],
+                  )
+                ],
               ),
             ),
+          ),
 
-            const SizedBox(height: 16),
+          const SizedBox(height: 16),
 
-            // Progress summary
-            Row(
-              children: [
-                Expanded(
-                  child: _SummaryCard(
-                    title: 'Weight',
-                    value: '72 kg',
-                    subtitle: '−0.4 kg this week',
-                    icon: Icons.monitor_weight,
-                  ),
+          // Progress summary
+          Row(
+            children: [
+              Expanded(
+                child: _SummaryCard(
+                  title: 'Weight',
+                  value: '72 kg',
+                  subtitle: '−0.4 kg this week',
+                  icon: Icons.monitor_weight,
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _SummaryCard(
-                    title: 'Activity',
-                    value: '3 workouts',
-                    subtitle: 'This week',
-                    icon: Icons.fitness_center,
-                  ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _SummaryCard(
+                  title: 'Activity',
+                  value: '3 workouts',
+                  subtitle: 'This week',
+                  icon: Icons.fitness_center,
                 ),
-              ],
-            ),
+              ),
+            ],
+          ),
 
-            const SizedBox(height: 16),
+          const SizedBox(height: 16),
 
-            // Quick actions
-            const Text('Quick actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _QuickAction(
-                  icon: Icons.add_circle_outline,
-                  label: 'Add Workout',
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Navigate to Workout Log (placeholder)')));
-                  },
-                ),
-                _QuickAction(
-                  icon: Icons.restaurant_menu,
-                  label: 'Log Calories',
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Open Calorie Tracker (placeholder)')));
-                  },
-                ),
-                _QuickAction(
-                  icon: Icons.show_chart,
-                  label: 'View Progress',
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Open Progress (placeholder)')));
-                  },
-                ),
-              ],
-            ),
+          // Quick actions
+          const Text('Quick actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _QuickAction(
+                icon: Icons.add_circle_outline,
+                label: 'Add Workout',
+                onTap: () {
+                  Navigator.of(context).pushNamed('/workouts');
+                },
+              ),
+              _QuickAction(
+                icon: Icons.restaurant_menu,
+                label: 'Log Calories',
+                onTap: () {
+                  Navigator.of(context).pushNamed('/calories');
+                },
+              ),
+              _QuickAction(
+                icon: Icons.show_chart,
+                label: 'View Progress',
+                onTap: () {
+                  Navigator.of(context).pushNamed('/progress');
+                },
+              ),
+            ],
+          ),
 
-            const Spacer(),
+          const Spacer(),
 
-            // Small footer / tip
-            Text(
-              'Tip: Tap actions or use the navigation bar to explore other sections.',
-              style: TextStyle(color: Colors.grey[600]),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.fitness_center), label: 'Workouts'),
-          BottomNavigationBarItem(icon: Icon(Icons.restaurant), label: 'Calories'),
+          // Small footer / tip
+          Text(
+            'Tip: Tap actions or use the navigation bar to explore other sections.',
+            style: TextStyle(color: Colors.grey[600]),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
         ],
-        currentIndex: 0,
-        onTap: (idx) {
-          // placeholders; real navigation will be added later
-          String message;
-          if (idx == 0) {
-            return; // already on Home
-          }
-          if (idx == 1) {
-            message = 'Open Workout Log (placeholder)';
-          } else {
-            message = 'Open Calorie Tracker (placeholder)';
-          }
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-        },
+      ),
+    );
+  }
+}
+
+class _WorkoutsTab extends StatelessWidget {
+  const _WorkoutsTab({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ElevatedButton(
+        onPressed: () => Navigator.of(context).pushNamed('/workouts'),
+        child: const Text('Open Workout Log'),
+      ),
+    );
+  }
+}
+
+class _CaloriesTab extends StatelessWidget {
+  const _CaloriesTab({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ElevatedButton(
+        onPressed: () => Navigator.of(context).pushNamed('/calories'),
+        child: const Text('Open Calorie Tracker'),
       ),
     );
   }
