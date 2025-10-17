@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../utils/responsive.dart';
+import 'workout_log_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -241,12 +242,7 @@ class _WorkoutsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: ElevatedButton(
-        onPressed: () => Navigator.of(context).pushNamed('/workouts'),
-        child: const Text('Open Workout Log'),
-      ),
-    );
+    return const WorkoutLogContent();
   }
 }
 
