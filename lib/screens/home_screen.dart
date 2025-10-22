@@ -242,7 +242,7 @@ class _WorkoutsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const WorkoutLogContent();
+    return const WorkoutLogScreen();
   }
 }
 
