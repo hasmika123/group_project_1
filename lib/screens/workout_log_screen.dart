@@ -1,44 +1,43 @@
 import 'package:flutter/material.dart';
 import '../utils/responsive.dart';
 
-// Basic models used in this file (moved here to repair file after corruption)
+// Basic models used in this file
 class Workout {
-  final String title;
-  final String type;
-  final int minutes;
-  final int? reps;
-  final int calories;
-  final String? notes;
-  final DateTime date;
+  String title;
+  String type;
+  int minutes;
+  int? reps;
+  int calories;
+  String? notes;
+  DateTime date;
 
-  Workout({required this.title, required this.type, required this.minutes, this.reps, required this.calories, this.notes, DateTime? date}) : date = date ?? DateTime.now();
+  Workout({required this.title, required this.type, required this.minutes, this.reps, required this.calories, this.notes, required this.date});
 }
 
 class WorkoutTemplate {
-  final String title;
-  final String type;
-  final int minutes;
-  final int? reps;
-  final int calories;
-  final String? notes;
-  final TimeOfDay? time;
+  String title;
+  String type;
+  int minutes;
+  int? reps;
+  int calories;
+  String? notes;
+  TimeOfDay? time;
 
   WorkoutTemplate({required this.title, required this.type, required this.minutes, this.reps, required this.calories, this.notes, this.time});
 }
 
 class PlanEntry {
-  final int dayOffset;
-  final List<WorkoutTemplate> templates;
+  int dayOffset;
+  List<WorkoutTemplate> templates;
   PlanEntry({required this.dayOffset, required this.templates});
 }
 
 class WorkoutPlan {
-  final String name;
-  final String? description;
-  final List<PlanEntry> entries;
+  String name;
+  String? description;
+  List<PlanEntry> entries;
   WorkoutPlan({required this.name, this.description, required this.entries});
 }
-
 int calculateCalories({required String type, required int minutes, int? reps}) {
   if (type == 'Other') return 0;
   switch (type) {
@@ -60,71 +59,17 @@ int calculateCalories({required String type, required int minutes, int? reps}) {
 class WorkoutLogScreen extends StatefulWidget {
   static const routeName = '/workout_log';
   const WorkoutLogScreen({Key? key}) : super(key: key);
+
   @override
   State<WorkoutLogScreen> createState() => _WorkoutLogScreenState();
 }
 
 class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
-
-  final List<Workout> _workouts = [
-    Workout(title: 'Morning Run', type: 'Running', minutes: 30, calories: 300, notes: 'Felt good'),
-    Workout(title: 'Strength Set', type: 'Strength Training', minutes: 30, reps: 50, calories: 150, notes: 'Upper body'),
-    Workout(title: 'Evening Yoga', type: 'Yoga', minutes: 40, calories: 120),
-  ];
-
-  // in-memory templates ("My Workouts")
-  final List<WorkoutTemplate> _templates = [
-    WorkoutTemplate(title: 'Quick Run', type: 'Running', minutes: 20, calories: 200),
-    WorkoutTemplate(title: 'Full Strength', type: 'Strength Training', minutes: 45, reps: 60, calories: 350),
-  ];
-
-  DateTime _focusedMonth = DateTime.now();
-  DateTime? _selectedDate;
-
-  // Workout plans
+  final List<Workout> _workouts = [];
+  final List<WorkoutTemplate> _templates = [];
   final List<WorkoutPlan> _plans = [];
-
-  @override
-  void initState() {
-    super.initState();
-    // add some basic plans
-      _plans.addAll([
-      WorkoutPlan(
-        name: 'Beginner',
-        description: 'Light 3-day starter plan',
-        entries: [
-          PlanEntry(dayOffset: 0, templates: [WorkoutTemplate(title: 'Light Run', type: 'Running', minutes: 20, calories: 180)]),
-          PlanEntry(dayOffset: 1, templates: [WorkoutTemplate(title: 'Bodyweight Strength', type: 'Strength Training', minutes: 25, calories: 200)]),
-          PlanEntry(dayOffset: 2, templates: [WorkoutTemplate(title: 'Yoga Stretch', type: 'Yoga', minutes: 30, calories: 100)]),
-        ],
-      ),
-      WorkoutPlan(
-        name: 'Intermediate',
-        description: '5-day mix of cardio and strength',
-        entries: [
-          PlanEntry(dayOffset: 0, templates: [WorkoutTemplate(title: 'Run', type: 'Running', minutes: 30, calories: 300)]),
-          PlanEntry(dayOffset: 1, templates: [WorkoutTemplate(title: 'Strength', type: 'Strength Training', minutes: 40, calories: 300)]),
-          PlanEntry(dayOffset: 2, templates: [WorkoutTemplate(title: 'HIIT', type: 'HIIT', minutes: 20, calories: 240)]),
-          PlanEntry(dayOffset: 3, templates: [WorkoutTemplate(title: 'Cycle', type: 'Cycling', minutes: 45, calories: 360)]),
-          PlanEntry(dayOffset: 4, templates: [WorkoutTemplate(title: 'Yoga', type: 'Yoga', minutes: 30, calories: 120)]),
-        ],
-      ),
-      WorkoutPlan(
-        name: 'Advanced',
-        description: '7-day higher intensity plan',
-        entries: [
-          PlanEntry(dayOffset: 0, templates: [WorkoutTemplate(title: 'Long Run', type: 'Running', minutes: 60, calories: 600)]),
-          PlanEntry(dayOffset: 1, templates: [WorkoutTemplate(title: 'Strength Heavy', type: 'Strength Training', minutes: 50, calories: 400)]),
-          PlanEntry(dayOffset: 2, templates: [WorkoutTemplate(title: 'HIIT', type: 'HIIT', minutes: 30, calories: 360)]),
-          PlanEntry(dayOffset: 3, templates: [WorkoutTemplate(title: 'Cycle Endurance', type: 'Cycling', minutes: 60, calories: 480)]),
-          PlanEntry(dayOffset: 4, templates: [WorkoutTemplate(title: 'Strength', type: 'Strength Training', minutes: 45, calories: 350)]),
-          PlanEntry(dayOffset: 5, templates: [WorkoutTemplate(title: 'HIIT', type: 'HIIT', minutes: 30, calories: 360)]),
-          PlanEntry(dayOffset: 6, templates: [WorkoutTemplate(title: 'Recovery Yoga', type: 'Yoga', minutes: 40, calories: 160)]),
-        ],
-      ),
-    ]);
-  }
-
+  DateTime? _selectedDate;
+  DateTime _focusedMonth = DateTime.now();
 
   void _openAddWorkoutSheet({DateTime? initialDate}) {
     showModalBottomSheet(
@@ -140,6 +85,8 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
               padding: const EdgeInsets.all(16.0),
               child: Text('Add workout', style: TextStyle(fontSize: Responsive.fontSize(context, 18), fontWeight: FontWeight.w700)),
             ),
+
+            // Create new workout
             ListTile(
               leading: const Icon(Icons.create),
               title: const Text('Create new workout'),
@@ -151,7 +98,6 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                   builder: (c2) => Padding(
                     padding: EdgeInsets.only(bottom: MediaQuery.of(c2).viewInsets.bottom),
                     child: _AddWorkoutForm(
-                      // pass initial date/time to the form via a constructor parameter
                       initialDate: _selectedDate,
                       onAdd: (w) {
                         setState(() => _workouts.insert(0, w));
@@ -163,12 +109,13 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                 );
               },
             ),
+
+            // Add from templates
             ListTile(
               leading: const Icon(Icons.bookmarks_outlined),
               title: const Text('Add from My Workouts'),
               onTap: () async {
                 Navigator.of(ctx).pop();
-                // open templates list and schedule selected template; pass initialDate so scheduling can be quicker
                 await showModalBottomSheet(
                   context: context,
                   isScrollControlled: true,
@@ -194,7 +141,6 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                                 subtitle: Text('${t.type} • ${t.minutes} min • ${t.calories} kcal'),
                                 onTap: () async {
                                   Navigator.of(c3).pop();
-                                  // schedule it using the provided initialDate
                                   final scheduled = await _scheduleTemplate(t, baseDate: initialDate);
                                   if (!mounted) return;
                                   if (scheduled != null) setState(() => _workouts.insert(0, Workout(title: t.title, type: t.type, minutes: t.minutes, reps: t.reps, calories: t.calories, notes: t.notes, date: scheduled)));
@@ -233,6 +179,80 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                 );
               },
             ),
+
+            // Create new plan
+            ListTile(
+              leading: const Icon(Icons.playlist_add),
+              title: const Text('Create new workout plan'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (c2) => Padding(
+                    padding: EdgeInsets.only(bottom: MediaQuery.of(c2).viewInsets.bottom),
+                    child: _PlanForm(onSave: (p) {
+                      setState(() => _plans.insert(0, p));
+                    }),
+                  ),
+                );
+              },
+            ),
+
+            // Add from plans
+            ListTile(
+              leading: const Icon(Icons.playlist_play),
+              title: const Text('Add from My Workout Plans'),
+              onTap: () async {
+                Navigator.of(ctx).pop();
+                await showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (c3) => Padding(
+                    padding: EdgeInsets.only(bottom: MediaQuery.of(c3).viewInsets.bottom),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Text('My Plans', style: TextStyle(fontSize: Responsive.fontSize(context, 18), fontWeight: FontWeight.w700)),
+                        ),
+                        Flexible(
+                          child: ListView.separated(
+                            shrinkWrap: true,
+                            itemCount: _plans.length,
+                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            itemBuilder: (ctx2, i) {
+                              final p = _plans[i];
+                              return ListTile(
+                                title: Text(p.name),
+                                subtitle: Text(p.description ?? ''),
+                                onTap: () async {
+                                  Navigator.of(c3).pop();
+                                  final start = await showDatePicker(context: context, initialDate: initialDate ?? DateTime.now(), firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 3650)));
+                                  if (start == null) return;
+                                  if (!mounted) return;
+                                  for (final e in p.entries) {
+                                    final entryDate = DateTime(start.year, start.month, start.day + e.dayOffset);
+                                    for (final tmpl in e.templates) {
+                                      final t = tmpl.time;
+                                      final d = t == null ? DateTime(entryDate.year, entryDate.month, entryDate.day, TimeOfDay.fromDateTime(DateTime.now()).hour, TimeOfDay.fromDateTime(DateTime.now()).minute) : DateTime(entryDate.year, entryDate.month, entryDate.day, t.hour, t.minute);
+                                      setState(() => _workouts.insert(0, Workout(title: tmpl.title, type: tmpl.type, minutes: tmpl.minutes, reps: tmpl.reps, calories: tmpl.calories, notes: tmpl.notes, date: d)));
+                                    }
+                                  }
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+
             const SizedBox(height: 8),
           ],
         ),
@@ -350,6 +370,7 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                   Expanded(child: Text('Plans', style: TextStyle(fontSize: Responsive.fontSize(context, 18), fontWeight: FontWeight.w700))),
                   TextButton(
                     onPressed: () {
+                      // close the plans manager and open the plan form
                       Navigator.of(context).pop();
                       showModalBottomSheet(
                         context: context,
@@ -357,8 +378,9 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                         builder: (c2) => Padding(
                           padding: EdgeInsets.only(bottom: MediaQuery.of(c2).viewInsets.bottom),
                           child: _PlanForm(onSave: (p) {
-                              setState(() => _plans.insert(0, p));
-                            }),
+                            setState(() => _plans.insert(0, p));
+                            Navigator.of(c2).pop();
+                          }),
                         ),
                       );
                     },
