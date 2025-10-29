@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/responsive.dart';
+import '../widgets/profile_setup_form.dart';
 
 class ProfileScreen extends StatefulWidget {
   static const routeName = '/profile';
@@ -54,7 +55,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Profile & BMR')),
+      appBar: AppBar(title: const Text('Profile & BMR'), actions: [
+        IconButton(
+          icon: const Icon(Icons.edit),
+          onPressed: () => _openEditProfile(context),
+        )
+      ]),
       body: Padding(
         padding: Responsive.pagePadding(context),
         child: _loading
@@ -81,6 +87,52 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
               ),
+      ),
+    );
+  }
+
+  void _openEditProfile(BuildContext context) async {
+  final ctx = context;
+  final navigator = Navigator.of(ctx);
+  final messenger = ScaffoldMessenger.of(ctx);
+
+    await showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      builder: (c) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(c).viewInsets.bottom),
+        child: ProfileSetupForm(
+          initialName: _name,
+          initialAge: _age,
+          initialSex: _sex,
+          initialWeight: _weight,
+          initialHeight: _height,
+          onSave: (name, age, sex, weight, height, bmr) async {
+            // capture navigator/messenger before awaiting
+            final nav = navigator;
+            final msg = messenger;
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('profile_name', name);
+            await prefs.setInt('profile_age', age);
+            await prefs.setString('profile_sex', sex);
+            await prefs.setDouble('profile_weight', weight);
+            await prefs.setDouble('profile_height', height);
+            await prefs.setDouble('profile_bmr', bmr);
+            // update local state
+            if (mounted) {
+              setState(() {
+                _name = name;
+                _age = age;
+                _sex = sex;
+                _weight = weight;
+                _height = height;
+                _bmr = bmr;
+              });
+              nav.pop();
+              msg.showSnackBar(const SnackBar(content: Text('Profile updated')));
+            }
+          },
+        ),
       ),
     );
   }
