@@ -58,7 +58,8 @@ int calculateCalories({required String type, required int minutes, int? reps}) {
 
 class WorkoutLogScreen extends StatefulWidget {
   static const routeName = '/workout_log';
-  const WorkoutLogScreen({Key? key}) : super(key: key);
+  final ValueNotifier<String?>? actionNotifier;
+  const WorkoutLogScreen({Key? key, this.actionNotifier}) : super(key: key);
 
   @override
   State<WorkoutLogScreen> createState() => _WorkoutLogScreenState();
@@ -70,6 +71,24 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
   final List<WorkoutPlan> _plans = [];
   DateTime? _selectedDate;
   DateTime _focusedMonth = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    // listen to external action notifier to programmatically open add-workout sheet
+    widget.actionNotifier?.addListener(() {
+      final v = widget.actionNotifier?.value;
+      if (v == 'create_new') {
+        // ensure UI updated / mounted before opening
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _openAddWorkoutSheet();
+            widget.actionNotifier?.value = null;
+          }
+        });
+      }
+    });
+  }
 
   void _openAddWorkoutSheet({DateTime? initialDate}) {
     showModalBottomSheet(

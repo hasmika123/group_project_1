@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../utils/responsive.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'workout_log_screen.dart';
+import '../widgets/profile_setup_form.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -12,6 +13,9 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
+  // Notifiers used to instruct tabs to open specific actions after switching
+  final ValueNotifier<String?> _workoutActionNotifier = ValueNotifier<String?>(null);
+  final ValueNotifier<String?> _calorieActionNotifier = ValueNotifier<String?>(null);
 
   @override
   void initState() {
@@ -40,7 +44,7 @@ class _HomeScreenState extends State<HomeScreen> {
       isDismissible: false,
       builder: (c) => Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.of(c).viewInsets.bottom),
-        child: _ProfileSetupForm(onSave: (name, age, sex, weight, height, bmr) async {
+        child: ProfileSetupForm(onSave: (name, age, sex, weight, height, bmr) async {
           final navigator = Navigator.of(c);
           final messenger = ScaffoldMessenger.of(ctx);
           final prefs = await SharedPreferences.getInstance();
@@ -79,9 +83,9 @@ class _HomeScreenState extends State<HomeScreen> {
       body: IndexedStack(
         index: _currentIndex,
         children: [
-          _HomeContent(onSelectTab: (i) => setState(() => _currentIndex = i)),
-          const _WorkoutsTab(),
-          const _CaloriesTab(),
+          _HomeContent(onSelectTab: (i) => setState(() => _currentIndex = i), workoutActionNotifier: _workoutActionNotifier, calorieActionNotifier: _calorieActionNotifier),
+          _WorkoutsTab(actionNotifier: _workoutActionNotifier),
+          _CaloriesTab(actionNotifier: _calorieActionNotifier),
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
@@ -101,7 +105,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
 class _HomeContent extends StatelessWidget {
   final void Function(int)? onSelectTab;
-  const _HomeContent({Key? key, this.onSelectTab}) : super(key: key);
+  final ValueNotifier<String?>? workoutActionNotifier;
+  final ValueNotifier<String?>? calorieActionNotifier;
+  const _HomeContent({Key? key, this.onSelectTab, this.workoutActionNotifier, this.calorieActionNotifier}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -240,6 +246,10 @@ class _HomeContent extends StatelessWidget {
                         final parent = context.findAncestorWidgetOfExactType<_HomeContent>();
                         if (parent is _HomeContent && parent.onSelectTab != null) {
                           parent.onSelectTab!(1);
+                          // after switching tabs, instruct the workouts tab to open the create-new sheet
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            parent.workoutActionNotifier?.value = 'create_new';
+                          });
                         } else {
                           Navigator.of(context).pushNamed('/workouts');
                         }
@@ -257,6 +267,9 @@ class _HomeContent extends StatelessWidget {
                         // if parent provided an onSelectTab callback, use it; otherwise fallback to navigation
                         if (parent is _HomeContent && parent.onSelectTab != null) {
                           parent.onSelectTab!(2);
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            parent.calorieActionNotifier?.value = 'log';
+                          });
                         } else {
                           Navigator.of(context).pushNamed('/calories');
                         }
@@ -299,11 +312,12 @@ class _HomeContent extends StatelessWidget {
 }
 
 class _WorkoutsTab extends StatelessWidget {
-  const _WorkoutsTab({Key? key}) : super(key: key);
+  final ValueNotifier<String?>? actionNotifier;
+  const _WorkoutsTab({Key? key, this.actionNotifier}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return const WorkoutLogScreen();
+    return WorkoutLogScreen(actionNotifier: actionNotifier);
   }
 }
 
@@ -315,7 +329,8 @@ class CalorieEntry {
 }
 
 class _CaloriesTab extends StatefulWidget {
-  const _CaloriesTab({Key? key}) : super(key: key);
+  final ValueNotifier<String?>? actionNotifier;
+  const _CaloriesTab({Key? key, this.actionNotifier}) : super(key: key);
 
   @override
   State<_CaloriesTab> createState() => _CaloriesTabState();
@@ -331,6 +346,22 @@ class _CaloriesTabState extends State<_CaloriesTab> {
 
   // For demo purposes we show a fixed burned value; in a later pass this can come from workouts data
   int get _burnedToday => 400;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.actionNotifier?.addListener(() {
+      final v = widget.actionNotifier?.value;
+      if (v == 'log') {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _showEntrySheet();
+            widget.actionNotifier?.value = null;
+          }
+        });
+      }
+    });
+  }
 
   
 
@@ -461,105 +492,7 @@ class _CaloriesTabState extends State<_CaloriesTab> {
   }
 }
 
-typedef ProfileSaveCallback = Future<void> Function(String name, int age, String sex, double weight, double height, double bmr);
-
-class _ProfileSetupForm extends StatefulWidget {
-  final ProfileSaveCallback onSave;
-  const _ProfileSetupForm({Key? key, required this.onSave}) : super(key: key);
-
-  @override
-  State<_ProfileSetupForm> createState() => _ProfileSetupFormState();
-}
-
-class _ProfileSetupFormState extends State<_ProfileSetupForm> {
-  final _nameCtl = TextEditingController();
-  final _ageCtl = TextEditingController();
-  final _weightCtl = TextEditingController();
-  final _heightCtl = TextEditingController();
-  String _sex = 'male';
-
-  double _bmr = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _ageCtl.addListener(_recalc);
-    _weightCtl.addListener(_recalc);
-    _heightCtl.addListener(_recalc);
-  }
-
-  @override
-  void dispose() {
-    _nameCtl.dispose();
-    _ageCtl.dispose();
-    _weightCtl.dispose();
-    _heightCtl.dispose();
-    super.dispose();
-  }
-
-  void _recalc() {
-    final age = int.tryParse(_ageCtl.text) ?? 0;
-    final weight = double.tryParse(_weightCtl.text) ?? 0.0;
-    final height = double.tryParse(_heightCtl.text) ?? 0.0;
-    setState(() => _bmr = _calculateBmr(sex: _sex, weightKg: weight, heightCm: height, age: age));
-  }
-
-  double _calculateBmr({required String sex, required double weightKg, required double heightCm, required int age}) {
-    // Mifflin-St Jeor Equation
-    if (sex == 'male') {
-      return 10 * weightKg + 6.25 * heightCm - 5 * age + 5;
-    } else {
-      return 10 * weightKg + 6.25 * heightCm - 5 * age - 161;
-    }
-  }
-
-  bool get _valid {
-    final name = _nameCtl.text.trim();
-    final age = int.tryParse(_ageCtl.text);
-    final weight = double.tryParse(_weightCtl.text);
-    final height = double.tryParse(_heightCtl.text);
-    return name.isNotEmpty && (age != null && age > 0) && (weight != null && weight > 0) && (height != null && height > 0);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(context).viewInsets.bottom),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(children: [IconButton(onPressed: () {}, icon: const Icon(Icons.person)), Expanded(child: Text('Profile setup', style: TextStyle(fontSize: Responsive.fontSize(context, 18), fontWeight: FontWeight.w700)))]),
-            const SizedBox(height: 8),
-            TextField(controller: _nameCtl, decoration: const InputDecoration(labelText: 'Name')),
-            const SizedBox(height: 8),
-            Row(children: [Expanded(child: TextField(controller: _ageCtl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Age'))), const SizedBox(width: 8), Expanded(child: DropdownButtonFormField<String>(initialValue: _sex, items: const [DropdownMenuItem(value: 'male', child: Text('Male')), DropdownMenuItem(value: 'female', child: Text('Female'))], onChanged: (v) => setState(() { _sex = v ?? 'male'; _recalc(); }), decoration: const InputDecoration(labelText: 'Sex')))]),
-            const SizedBox(height: 8),
-            Row(children: [Expanded(child: TextField(controller: _weightCtl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Weight (kg)'))), const SizedBox(width: 8), Expanded(child: TextField(controller: _heightCtl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Height (cm)')))]),
-            const SizedBox(height: 12),
-            Text('Estimated BMR: ${_bmr.toStringAsFixed(0)} kcal/day', style: TextStyle(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: _valid
-                  ? () async {
-                      final name = _nameCtl.text.trim();
-                      final age = int.parse(_ageCtl.text);
-                      final weight = double.parse(_weightCtl.text);
-                      final height = double.parse(_heightCtl.text);
-                      final bmr = _calculateBmr(sex: _sex, weightKg: weight, heightCm: height, age: age);
-                      await widget.onSave(name, age, _sex, weight, height, bmr);
-                    }
-                  : null,
-              child: const Text('Save Profile'),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-}
+// ...existing code...
 
 class _SummaryCard extends StatelessWidget {
   final String title;
