@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import '../utils/responsive.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+// SharedPreferences is no longer used for profile flag; profile presence is stored in SQLite
 import 'workout_log_screen.dart';
 import '../widgets/profile_setup_form.dart';
+import '../services/database_helper.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -25,9 +26,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _maybeShowProfileSetup() {
     // Use .then to avoid using 'await' so we don't use the widget BuildContext across an async gap.
-    return SharedPreferences.getInstance().then((prefs) {
-      final done = prefs.getBool('profile_setup_done') ?? false;
-      if (!done) {
+    // Show profile setup when there is no profile row in the database.
+    return DatabaseHelper.instance.getProfile().then((row) {
+      final hasProfile = row != null;
+      if (!hasProfile) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _showProfileSetup(context);
         });
@@ -44,17 +46,18 @@ class _HomeScreenState extends State<HomeScreen> {
       isDismissible: false,
       builder: (c) => Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.of(c).viewInsets.bottom),
-        child: ProfileSetupForm(onSave: (name, age, sex, weight, height, bmr) async {
+          child: ProfileSetupForm(onSave: (name, age, sex, weight, height, bmr) async {
           final navigator = Navigator.of(c);
           final messenger = ScaffoldMessenger.of(ctx);
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool('profile_setup_done', true);
-          await prefs.setString('profile_name', name);
-          await prefs.setInt('profile_age', age);
-          await prefs.setString('profile_sex', sex);
-          await prefs.setDouble('profile_weight', weight);
-          await prefs.setDouble('profile_height', height);
-          await prefs.setDouble('profile_bmr', bmr);
+          // Persist profile to SQLite (we use presence of the profile row as the first-run indicator)
+          await DatabaseHelper.instance.upsertProfile({
+            'name': name,
+            'age': age,
+            'sex': sex,
+            'weight': weight,
+            'height': height,
+            'bmr': bmr,
+          });
           if (mounted) {
             navigator.pop();
             messenger.showSnackBar(const SnackBar(content: Text('Profile saved')));
@@ -103,18 +106,81 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class _HomeContent extends StatelessWidget {
+class _HomeContent extends StatefulWidget {
   final void Function(int)? onSelectTab;
   final ValueNotifier<String?>? workoutActionNotifier;
   final ValueNotifier<String?>? calorieActionNotifier;
   const _HomeContent({Key? key, this.onSelectTab, this.workoutActionNotifier, this.calorieActionNotifier}) : super(key: key);
 
   @override
+  State<_HomeContent> createState() => _HomeContentState();
+}
+
+class _HomeContentState extends State<_HomeContent> {
+  int _caloriesConsumed = 0;
+  int _caloriesBurned = 0;
+  double? _weight;
+  int _bmrDaily = 0;
+  int _workoutsThisWeek = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOverview();
+    // Listen for DB changes to refresh the overview dynamically
+    DatabaseHelper.instance.caloriesNotifier.addListener(_loadOverview);
+    DatabaseHelper.instance.workoutsNotifier.addListener(_loadOverview);
+    DatabaseHelper.instance.profileNotifier.addListener(_loadOverview);
+  }
+
+  @override
+  void dispose() {
+    DatabaseHelper.instance.caloriesNotifier.removeListener(_loadOverview);
+    DatabaseHelper.instance.workoutsNotifier.removeListener(_loadOverview);
+    DatabaseHelper.instance.profileNotifier.removeListener(_loadOverview);
+    super.dispose();
+  }
+
+  Future<void> _loadOverview() async {
+    final today = DateTime.now();
+    // consumed today
+    final cRows = await DatabaseHelper.instance.getCalories(day: today);
+    final consumed = cRows.fold<int>(0, (s, r) => s + ((r['calories'] as num?)?.toInt() ?? 0));
+
+    // burned today (from workouts)
+    final wRows = await DatabaseHelper.instance.getWorkouts(day: today);
+    final burned = wRows.fold<int>(0, (s, r) => s + ((r['calories'] as num?)?.toInt() ?? 0));
+
+    // workouts this week (simple last 7 days)
+    final weekStart = DateTime(today.year, today.month, today.day).subtract(const Duration(days: 6));
+    final weekRows = await DatabaseHelper.instance.getWorkouts();
+    final workoutsThisWeek = weekRows.where((r) {
+      final d = DateTime.fromMillisecondsSinceEpoch((r['date'] as num?)?.toInt() ?? 0);
+      return d.isAfter(weekStart.subtract(const Duration(seconds: 1)));
+    }).length;
+
+    // profile weight
+    final profile = await DatabaseHelper.instance.getProfile();
+  final weight = (profile != null && profile['weight'] != null) ? (profile['weight'] as num).toDouble() : null;
+  final bmr = (profile != null && profile['bmr'] != null) ? (profile['bmr'] as num).toInt() : 0;
+
+    if (!mounted) return;
+    setState(() {
+      _caloriesConsumed = consumed;
+      _caloriesBurned = burned;
+      _workoutsThisWeek = workoutsThisWeek;
+      _weight = weight;
+      _bmrDaily = bmr;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // Simple sample values; future work will wire these to real data/models
-    final int caloriesConsumed = 1450;
-    final int caloriesBurned = 400;
-    final int deficit = caloriesBurned - caloriesConsumed; // intentionally simple
+  final int caloriesConsumed = _caloriesConsumed;
+  final int workoutBurned = _caloriesBurned;
+  final int bmr = _bmrDaily;
+  final int totalBurned = workoutBurned + bmr;
+  final int deficit = totalBurned - caloriesConsumed;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -165,7 +231,11 @@ class _HomeContent extends StatelessWidget {
                         children: [
                           Text('Consumed: $caloriesConsumed kcal'),
                           const SizedBox(height: 6),
-                          Text('Burned: $caloriesBurned kcal'),
+                          Text('Workout burned: $workoutBurned kcal'),
+                          const SizedBox(height: 4),
+                          Text('BMR (est.): $bmr kcal'),
+                          const SizedBox(height: 6),
+                          Text('Total expenditure: $totalBurned kcal', style: TextStyle(fontWeight: FontWeight.w600)),
                         ],
                       )
                     ],
@@ -183,17 +253,17 @@ class _HomeContent extends StatelessWidget {
                   children: [
                     Expanded(
                       child: _SummaryCard(
-                        title: 'Weight',
-                        value: '72 kg',
-                        subtitle: '−0.4 kg this week',
-                        icon: Icons.monitor_weight,
-                      ),
+                          title: 'Weight',
+                          value: _weight != null ? '${_weight!.toStringAsFixed(1)} kg' : '--',
+                          subtitle: '−0.4 kg this week',
+                          icon: Icons.monitor_weight,
+                        ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: _SummaryCard(
                         title: 'Activity',
-                        value: '3 workouts',
+                        value: '$_workoutsThisWeek workouts',
                         subtitle: 'This week',
                         icon: Icons.fitness_center,
                       ),
@@ -204,14 +274,14 @@ class _HomeContent extends StatelessWidget {
                   children: [
                     _SummaryCard(
                       title: 'Weight',
-                      value: '72 kg',
+                      value: _weight != null ? '${_weight!.toStringAsFixed(1)} kg' : '--',
                       subtitle: '−0.4 kg this week',
                       icon: Icons.monitor_weight,
                     ),
                     const SizedBox(height: 12),
                     _SummaryCard(
                       title: 'Activity',
-                      value: '3 workouts',
+                      value: '$_workoutsThisWeek workouts',
                       subtitle: 'This week',
                       icon: Icons.fitness_center,
                     ),
@@ -322,10 +392,25 @@ class _WorkoutsTab extends StatelessWidget {
 }
 
 class CalorieEntry {
+  final int? id;
   final String name;
   final int calories;
   final DateTime date;
-  CalorieEntry({required this.name, required this.calories, DateTime? date}) : date = date ?? DateTime.now();
+  CalorieEntry({this.id, required this.name, required this.calories, DateTime? date}) : date = date ?? DateTime.now();
+
+  Map<String, Object?> toMap() => {
+        if (id != null) 'id': id,
+        'name': name,
+        'calories': calories,
+        'date': date.millisecondsSinceEpoch,
+      };
+
+  static CalorieEntry fromMap(Map<String, Object?> m) => CalorieEntry(
+        id: m['id'] as int?,
+        name: m['name'] as String,
+        calories: m['calories'] as int,
+        date: DateTime.fromMillisecondsSinceEpoch(m['date'] as int),
+      );
 }
 
 class _CaloriesTab extends StatefulWidget {
@@ -344,12 +429,14 @@ class _CaloriesTabState extends State<_CaloriesTab> {
     return _entries.where((e) => e.date.year == today.year && e.date.month == today.month && e.date.day == today.day).fold(0, (s, e) => s + e.calories);
   }
 
-  // For demo purposes we show a fixed burned value; in a later pass this can come from workouts data
-  int get _burnedToday => 400;
+  int _burnedToday = 0;
 
   @override
   void initState() {
     super.initState();
+    // Load persisted calorie entries from the database
+    _loadEntries();
+
     widget.actionNotifier?.addListener(() {
       final v = widget.actionNotifier?.value;
       if (v == 'log') {
@@ -361,6 +448,33 @@ class _CaloriesTabState extends State<_CaloriesTab> {
         });
       }
     });
+    // react to DB changes
+    DatabaseHelper.instance.caloriesNotifier.addListener(_loadEntries);
+    DatabaseHelper.instance.workoutsNotifier.addListener(_loadEntries);
+    DatabaseHelper.instance.profileNotifier.addListener(_loadEntries);
+  }
+
+  @override
+  void dispose() {
+    DatabaseHelper.instance.caloriesNotifier.removeListener(_loadEntries);
+    DatabaseHelper.instance.workoutsNotifier.removeListener(_loadEntries);
+    DatabaseHelper.instance.profileNotifier.removeListener(_loadEntries);
+    super.dispose();
+  }
+
+  Future<void> _loadEntries() async {
+    final rows = await DatabaseHelper.instance.getCalories();
+    _entries.clear();
+    _entries.addAll(rows.map((r) => CalorieEntry.fromMap(r)));
+    // compute burned today from workouts
+    final today = DateTime.now();
+    final wRows = await DatabaseHelper.instance.getWorkouts(day: today);
+    final burned = wRows.fold<int>(0, (s, r) => s + ((r['calories'] as num?)?.toInt() ?? 0));
+    // include BMR estimate from profile
+    final profile = await DatabaseHelper.instance.getProfile();
+    final bmr = (profile != null && profile['bmr'] != null) ? (profile['bmr'] as num).toInt() : 0;
+    _burnedToday = burned + bmr;
+    if (mounted) setState(() {});
   }
 
   
@@ -384,40 +498,57 @@ class _CaloriesTabState extends State<_CaloriesTab> {
             const SizedBox(height: 8),
             TextField(controller: calCtl, decoration: const InputDecoration(labelText: 'Calories'), keyboardType: TextInputType.number),
             const SizedBox(height: 12),
-            ElevatedButton(onPressed: () {
+            ElevatedButton(onPressed: () async {
+              final nav = Navigator.of(c);
+              final messenger = ScaffoldMessenger.of(context);
               final name = nameCtl.text.trim();
               final cals = int.tryParse(calCtl.text) ?? 0;
               if (name.isEmpty || cals <= 0) return;
 
               if (existing == null) {
-                final newEntry = CalorieEntry(name: name, calories: cals);
+                // insert into DB
+                final now = DateTime.now();
+                final id = await DatabaseHelper.instance.insertCalorie({'name': name, 'calories': cals, 'date': now.millisecondsSinceEpoch});
+                final newEntry = CalorieEntry(id: id, name: name, calories: cals, date: now);
+                if (!mounted) return;
                 setState(() => _entries.insert(0, newEntry));
 
-                ScaffoldMessenger.of(context).clearSnackBars();
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                messenger.clearSnackBars();
+                messenger.showSnackBar(SnackBar(
                   content: Text('Added ${newEntry.calories} kcal'),
-                  action: SnackBarAction(label: 'Undo', onPressed: () {
+                  action: SnackBarAction(label: 'Undo', onPressed: () async {
+                    // remove from DB and list
+                    await DatabaseHelper.instance.deleteCalorie(newEntry.id!);
+                    if (!mounted) return;
                     setState(() {
-                      final idx = _entries.indexOf(newEntry);
+                      final idx = _entries.indexWhere((e) => e.id == newEntry.id);
                       if (idx != -1) _entries.removeAt(idx);
                     });
                   }),
                 ));
               } else if (index != null && index >= 0 && index < _entries.length) {
                 final old = _entries[index];
-                final updated = CalorieEntry(name: name, calories: cals, date: old.date);
-                setState(() => _entries[index] = updated);
+                // update DB
+                if (old.id != null) {
+                  await DatabaseHelper.instance.updateCalorie(old.id!, {'name': name, 'calories': cals, 'date': old.date.millisecondsSinceEpoch});
+                  final updated = CalorieEntry(id: old.id, name: name, calories: cals, date: old.date);
+                  if (!mounted) return;
+                  setState(() => _entries[index] = updated);
 
-                ScaffoldMessenger.of(context).clearSnackBars();
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: const Text('Entry updated'),
-                  action: SnackBarAction(label: 'Undo', onPressed: () {
-                    setState(() => _entries[index] = old);
-                  }),
-                ));
+                  messenger.clearSnackBars();
+                  messenger.showSnackBar(SnackBar(
+                    content: const Text('Entry updated'),
+                    action: SnackBarAction(label: 'Undo', onPressed: () async {
+                      // revert DB change
+                      await DatabaseHelper.instance.updateCalorie(old.id!, {'name': old.name, 'calories': old.calories, 'date': old.date.millisecondsSinceEpoch});
+                      if (!mounted) return;
+                      setState(() => _entries[index] = old);
+                    }),
+                  ));
+                }
               }
 
-              Navigator.of(c).pop();
+              nav.pop();
             }, child: Text(existing == null ? 'Add' : 'Save')),
             const SizedBox(height: 8),
           ],
@@ -468,17 +599,58 @@ class _CaloriesTabState extends State<_CaloriesTab> {
                       final e = _entries[i];
                       return ListTile(
                         title: Text(e.name),
-                        subtitle: Text('${e.date.hour.toString().padLeft(2, '0')}:${e.date.minute.toString().padLeft(2, '0')}'),
-                        trailing: Text('${e.calories} kcal'),
+                        subtitle: Text('${e.date.hour.toString().padLeft(2, '0')}:${e.date.minute.toString().padLeft(2, '0')} • Tap to edit'),
                         onTap: () => _showEntrySheet(existing: e, index: i),
-                        onLongPress: () {
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(onPressed: () => _showEntrySheet(existing: e, index: i), icon: const Icon(Icons.edit, color: Colors.blue)),
+                            PopupMenuButton<String>(
+                              onSelected: (v) async {
+                                if (v == 'delete') {
+                                  final messenger = ScaffoldMessenger.of(context);
+                                  final removed = _entries.removeAt(i);
+                                  if (!mounted) return;
+                                  setState(() {});
+                                  if (removed.id != null) await DatabaseHelper.instance.deleteCalorie(removed.id!);
+                                  messenger.clearSnackBars();
+                                  messenger.showSnackBar(SnackBar(
+                                    content: Text('Removed ${removed.name} (${removed.calories} kcal)'),
+                                    action: SnackBarAction(label: 'Undo', onPressed: () async {
+                                      final newId = await DatabaseHelper.instance.insertCalorie({'name': removed.name, 'calories': removed.calories, 'date': removed.date.millisecondsSinceEpoch});
+                                      final restored = CalorieEntry(id: newId, name: removed.name, calories: removed.calories, date: removed.date);
+                                      if (!mounted) return;
+                                      setState(() => _entries.insert(i, restored));
+                                    }),
+                                  ));
+                                }
+                              },
+                              itemBuilder: (_) => [
+                                const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete, color: Colors.red), title: Text('Delete'))),
+                              ],
+                            ),
+                            const SizedBox(width: 8),
+                            Text('${e.calories} kcal'),
+                          ],
+                        ),
+                        onLongPress: () async {
+                          final messenger = ScaffoldMessenger.of(context);
                           final removed = _entries.removeAt(i);
+                          if (!mounted) return;
                           setState(() {});
-                          ScaffoldMessenger.of(context).clearSnackBars();
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          // delete from DB
+                          if (removed.id != null) {
+                            await DatabaseHelper.instance.deleteCalorie(removed.id!);
+                          }
+                          messenger.clearSnackBars();
+                          messenger.showSnackBar(SnackBar(
                             content: Text('Removed ${removed.name} (${removed.calories} kcal)'),
-                            action: SnackBarAction(label: 'Undo', onPressed: () {
-                              setState(() => _entries.insert(i, removed));
+                            action: SnackBarAction(label: 'Undo', onPressed: () async {
+                              // re-insert into DB and list
+                              final newId = await DatabaseHelper.instance.insertCalorie({'name': removed.name, 'calories': removed.calories, 'date': removed.date.millisecondsSinceEpoch});
+                              final restored = CalorieEntry(id: newId, name: removed.name, calories: removed.calories, date: removed.date);
+                              if (!mounted) return;
+                              setState(() => _entries.insert(i, restored));
                             }),
                           ));
                         },

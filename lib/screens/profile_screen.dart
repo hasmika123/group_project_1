@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/database_helper.dart';
 import '../utils/responsive.dart';
 import '../widgets/profile_setup_form.dart';
 
@@ -27,14 +27,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _loadProfile() async {
-    final prefs = await SharedPreferences.getInstance();
+    final row = await DatabaseHelper.instance.getProfile();
     setState(() {
-      _name = prefs.getString('profile_name');
-      _age = prefs.getInt('profile_age');
-      _sex = prefs.getString('profile_sex');
-      _weight = prefs.getDouble('profile_weight');
-      _height = prefs.getDouble('profile_height');
-      _bmr = prefs.getDouble('profile_bmr');
+      if (row != null) {
+        _name = row['name'] as String?;
+        _age = row['age'] as int?;
+        _sex = row['sex'] as String?;
+        _weight = (row['weight'] as num?)?.toDouble();
+        _height = (row['height'] as num?)?.toDouble();
+        _bmr = (row['bmr'] as num?)?.toDouble();
+      } else {
+        _name = null;
+        _age = null;
+        _sex = null;
+        _weight = null;
+        _height = null;
+        _bmr = null;
+      }
       _loading = false;
     });
   }
@@ -111,13 +120,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
             // capture navigator/messenger before awaiting
             final nav = navigator;
             final msg = messenger;
-            final prefs = await SharedPreferences.getInstance();
-            await prefs.setString('profile_name', name);
-            await prefs.setInt('profile_age', age);
-            await prefs.setString('profile_sex', sex);
-            await prefs.setDouble('profile_weight', weight);
-            await prefs.setDouble('profile_height', height);
-            await prefs.setDouble('profile_bmr', bmr);
+            await DatabaseHelper.instance.upsertProfile({
+              'name': name,
+              'age': age,
+              'sex': sex,
+              'weight': weight,
+              'height': height,
+              'bmr': bmr,
+            });
             // update local state
             if (mounted) {
               setState(() {
