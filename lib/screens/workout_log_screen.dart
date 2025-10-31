@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import '../utils/responsive.dart';
+import '../services/database_helper.dart';
 
 // Basic models used in this file
 class Workout {
+  int? id;
   String title;
   String type;
   int minutes;
@@ -10,11 +13,33 @@ class Workout {
   int calories;
   String? notes;
   DateTime date;
+  Workout({this.id, required this.title, required this.type, required this.minutes, this.reps, required this.calories, this.notes, required this.date});
 
-  Workout({required this.title, required this.type, required this.minutes, this.reps, required this.calories, this.notes, required this.date});
+  Map<String, Object?> toMap() => {
+        if (id != null) 'id': id,
+        'title': title,
+        'type': type,
+        'minutes': minutes,
+        'reps': reps,
+        'calories': calories,
+        'notes': notes,
+        'date': date.millisecondsSinceEpoch,
+      };
+
+  static Workout fromMap(Map<String, Object?> m) => Workout(
+    id: _parseId(m['id']),
+    title: m['title'] as String,
+    type: m['type'] as String,
+    minutes: (m['minutes'] as num).toInt(),
+    reps: m['reps'] == null ? null : (m['reps'] as num).toInt(),
+    calories: (m['calories'] as num).toInt(),
+    notes: m['notes'] as String?,
+    date: DateTime.fromMillisecondsSinceEpoch((m['date'] as num).toInt()),
+      );
 }
 
 class WorkoutTemplate {
+  int? id;
   String title;
   String type;
   int minutes;
@@ -22,21 +47,60 @@ class WorkoutTemplate {
   int calories;
   String? notes;
   TimeOfDay? time;
+  WorkoutTemplate({this.id, required this.title, required this.type, required this.minutes, this.reps, required this.calories, this.notes, this.time});
 
-  WorkoutTemplate({required this.title, required this.type, required this.minutes, this.reps, required this.calories, this.notes, this.time});
+  Map<String, Object?> toMap() => {
+        if (id != null) 'id': id,
+        'title': title,
+        'type': type,
+        'minutes': minutes,
+        'reps': reps,
+        'calories': calories,
+        'notes': notes,
+        'time': time == null ? null : '${time!.hour}:${time!.minute}',
+      };
+
+  static WorkoutTemplate fromMap(Map<String, Object?> m) {
+    TimeOfDay? parsed;
+    if (m['time'] != null) {
+      final parts = (m['time'] as String).split(':');
+      parsed = TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+    }
+    return WorkoutTemplate(
+      id: _parseId(m['id']),
+      title: m['title'] as String,
+      type: m['type'] as String,
+      minutes: (m['minutes'] as num).toInt(),
+      reps: m['reps'] == null ? null : (m['reps'] as num).toInt(),
+      calories: (m['calories'] as num).toInt(),
+      notes: m['notes'] as String?,
+      time: parsed,
+    );
+  }
+}
+
+// Helper to parse an id that may be int, num, or String (from JSON)
+int? _parseId(dynamic v) {
+  if (v == null) return null;
+  if (v is int) return v;
+  if (v is num) return v.toInt();
+  if (v is String) return int.tryParse(v);
+  return null;
 }
 
 class PlanEntry {
+  int? id;
   int dayOffset;
   List<WorkoutTemplate> templates;
-  PlanEntry({required this.dayOffset, required this.templates});
+  PlanEntry({this.id, required this.dayOffset, required this.templates});
 }
 
 class WorkoutPlan {
+  int? id;
   String name;
   String? description;
   List<PlanEntry> entries;
-  WorkoutPlan({required this.name, this.description, required this.entries});
+  WorkoutPlan({this.id, required this.name, this.description, required this.entries});
 }
 int calculateCalories({required String type, required int minutes, int? reps}) {
   if (type == 'Other') return 0;
@@ -72,9 +136,17 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
   DateTime? _selectedDate;
   DateTime _focusedMonth = DateTime.now();
 
+  DateTime _clampToToday(DateTime d) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    if (d.isBefore(today)) return today;
+    return d;
+  }
+
   @override
   void initState() {
     super.initState();
+    _loadFromDb();
     // listen to external action notifier to programmatically open add-workout sheet
     widget.actionNotifier?.addListener(() {
       final v = widget.actionNotifier?.value;
@@ -88,6 +160,50 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
         });
       }
     });
+    // listen for DB changes so the workouts list refreshes when other tabs change data
+    DatabaseHelper.instance.workoutsNotifier.addListener(_loadFromDb);
+    DatabaseHelper.instance.caloriesNotifier.addListener(_loadFromDb);
+  }
+
+  @override
+  void dispose() {
+    DatabaseHelper.instance.workoutsNotifier.removeListener(_loadFromDb);
+    DatabaseHelper.instance.caloriesNotifier.removeListener(_loadFromDb);
+    super.dispose();
+  }
+
+  Future<void> _loadFromDb() async {
+    // Load workouts and templates from local DB
+    try {
+      final wRows = await DatabaseHelper.instance.getWorkouts();
+      _workouts.clear();
+      _workouts.addAll(wRows.map((r) => Workout.fromMap(r)));
+
+      final tRows = await DatabaseHelper.instance.getTemplates();
+      _templates.clear();
+      _templates.addAll(tRows.map((r) => WorkoutTemplate.fromMap(r)));
+      // load plans (normalized schema)
+      try {
+        final pRows = await DatabaseHelper.instance.getFullPlans();
+        _plans.clear();
+        for (final pmap in pRows) {
+          final planRow = pmap['plan'] as Map<String, Object?>;
+          final entriesRaw = pmap['entries'] as List;
+            final entries = entriesRaw.map<PlanEntry>((er) {
+            final entry = er['entry'] as Map<String, Object?>;
+            final templatesRaw = er['templates'] as List;
+            final templates = templatesRaw.map<WorkoutTemplate>((t) => WorkoutTemplate.fromMap(t as Map<String, Object?>)).toList();
+            return PlanEntry(id: entry['id'] as int?, dayOffset: entry['day_offset'] as int, templates: templates);
+          }).toList();
+          _plans.add(WorkoutPlan(id: planRow['id'] as int?, name: planRow['name'] as String, description: planRow['description'] as String?, entries: entries));
+        }
+      } catch (_) {
+        // ignore plan load errors for now
+      }
+      if (mounted) setState(() {});
+    } catch (e) {
+      // ignore DB errors for now
+    }
   }
 
   void _openAddWorkoutSheet({DateTime? initialDate}) {
@@ -118,11 +234,20 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                     padding: EdgeInsets.only(bottom: MediaQuery.of(c2).viewInsets.bottom),
                     child: _AddWorkoutForm(
                       initialDate: _selectedDate,
-                      onAdd: (w) {
-                        setState(() => _workouts.insert(0, w));
-                        Navigator.of(c2).pop();
+                      onAdd: (w) async {
+                        final nav = Navigator.of(c2);
+                        final id = await DatabaseHelper.instance.insertWorkout(w.toMap());
+                        if (!mounted) return;
+                        final newW = Workout(id: id, title: w.title, type: w.type, minutes: w.minutes, reps: w.reps, calories: w.calories, notes: w.notes, date: w.date);
+                        setState(() => _workouts.insert(0, newW));
+                        nav.pop();
                       },
-                      onSaveTemplate: (tmpl) => setState(() => _templates.insert(0, tmpl)),
+                      onSaveTemplate: (tmpl) async {
+                        final tid = await DatabaseHelper.instance.insertTemplate(tmpl.toMap());
+                        if (!mounted) return;
+                        final newT = WorkoutTemplate(id: tid, title: tmpl.title, type: tmpl.type, minutes: tmpl.minutes, reps: tmpl.reps, calories: tmpl.calories, notes: tmpl.notes, time: tmpl.time);
+                        setState(() => _templates.insert(0, newT));
+                      },
                     ),
                   ),
                 );
@@ -149,45 +274,81 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                           child: Text('My Workouts', style: TextStyle(fontSize: Responsive.fontSize(context, 18), fontWeight: FontWeight.w700)),
                         ),
                         Flexible(
-                          child: ListView.separated(
-                            shrinkWrap: true,
-                            itemCount: _templates.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1),
-                            itemBuilder: (ctx2, i) {
-                              final t = _templates[i];
-                              return ListTile(
-                                title: Text(t.title),
-                                subtitle: Text('${t.type} • ${t.minutes} min • ${t.calories} kcal'),
-                                onTap: () async {
-                                  Navigator.of(c3).pop();
-                                  final scheduled = await _scheduleTemplate(t, baseDate: initialDate);
-                                  if (!mounted) return;
-                                  if (scheduled != null) setState(() => _workouts.insert(0, Workout(title: t.title, type: t.type, minutes: t.minutes, reps: t.reps, calories: t.calories, notes: t.notes, date: scheduled)));
-                                },
-                                trailing: PopupMenuButton<String>(
-                                  onSelected: (action) async {
-                                    if (action == 'edit') {
+                          child: StatefulBuilder(
+                            builder: (modalCtx, modalSetState) {
+                              if (_templates.isEmpty) {
+                                return Padding(
+                                  padding: const EdgeInsets.all(24.0),
+                                  child: Center(
+                                    child: Text('No saved workouts yet. Create one using "Create new workout" or tap "Save to My Workouts" when adding a workout.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[600])),
+                                  ),
+                                );
+                              }
+                              return ListView.separated(
+                                shrinkWrap: true,
+                                itemCount: _templates.length,
+                                separatorBuilder: (_, __) => const Divider(height: 1),
+                                itemBuilder: (ctx2, i) {
+                                  final t = _templates[i];
+                                  return ListTile(
+                                    title: Text(t.title),
+                                    subtitle: Text('${t.type} • ${t.minutes} min • ${t.calories} kcal'),
+                                    onTap: () async {
                                       Navigator.of(c3).pop();
-                                      showModalBottomSheet(
-                                        context: context,
-                                        isScrollControlled: true,
-                                        builder: (c2) => Padding(
-                                          padding: EdgeInsets.only(bottom: MediaQuery.of(c2).viewInsets.bottom),
-                                          child: _TemplateForm(initial: t, onSave: (updated) {
-                                            setState(() => _templates[i] = updated);
-                                            Navigator.of(c2).pop();
-                                          }),
-                                        ),
-                                      );
-                                    } else if (action == 'delete') {
-                                      setState(() => _templates.removeAt(i));
-                                    }
-                                  },
-                                  itemBuilder: (_) => [
-                                    const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                                    const PopupMenuItem(value: 'delete', child: Text('Delete')),
-                                  ],
-                                ),
+                                      final scheduled = await _scheduleTemplate(t, baseDate: initialDate);
+                                      if (!mounted) return;
+                                      if (scheduled != null) {
+                                        final w = Workout(title: t.title, type: t.type, minutes: t.minutes, reps: t.reps, calories: t.calories, notes: t.notes, date: scheduled);
+                                        final id = await DatabaseHelper.instance.insertWorkout(w.toMap());
+                                        final newW = Workout(id: id, title: w.title, type: w.type, minutes: w.minutes, reps: w.reps, calories: w.calories, notes: w.notes, date: w.date);
+                                        setState(() => _workouts.insert(0, newW));
+                                      }
+                                    },
+                                    trailing: PopupMenuButton<String>(
+                                      onSelected: (action) async {
+                                        if (action == 'edit') {
+                                          Navigator.of(c3).pop();
+                                          showModalBottomSheet(
+                                            context: context,
+                                            isScrollControlled: true,
+                                            builder: (c2) => Padding(
+                                              padding: EdgeInsets.only(bottom: MediaQuery.of(c2).viewInsets.bottom),
+                                              child: _TemplateForm(initial: t, onSave: (updated) async {
+                                                // persist update to DB then update UI
+                                                final nav = Navigator.of(c2);
+                                                if (updated.id != null) {
+                                                  await DatabaseHelper.instance.updateTemplate(updated.id!, updated.toMap());
+                                                }
+                                                if (!mounted) return;
+                                                // update both modal local state and parent state
+                                                modalSetState(() => _templates[i] = updated);
+                                                setState(() {});
+                                                nav.pop();
+                                              }),
+                                            ),
+                                          );
+                                        } else if (action == 'delete') {
+                                          // remove from DB and UI (guard index to avoid RangeError)
+                                          if (i >= 0 && i < _templates.length) {
+                                            final toRemove = _templates.removeAt(i);
+                                            // update modal UI immediately
+                                            modalSetState(() {});
+                                            if (toRemove.id != null) await DatabaseHelper.instance.deleteTemplate(toRemove.id!);
+                                            // ensure canonical state
+                                            await _loadFromDb();
+                                            // refresh both modal and parent
+                                            modalSetState(() {});
+                                            setState(() {});
+                                          }
+                                        }
+                                      },
+                                      itemBuilder: (_) => [
+                                        const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                                        const PopupMenuItem(value: 'delete', child: Text('Delete')),
+                                      ],
+                                    ),
+                                  );
+                                },
                               );
                             },
                           ),
@@ -210,8 +371,35 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                   isScrollControlled: true,
                   builder: (c2) => Padding(
                     padding: EdgeInsets.only(bottom: MediaQuery.of(c2).viewInsets.bottom),
-                    child: _PlanForm(onSave: (p) {
-                      setState(() => _plans.insert(0, p));
+                    child: _PlanForm(onSave: (p) async {
+                      // persist plan and its entries/templates to DB
+                      final pid = await DatabaseHelper.instance.insertPlan({'name': p.name, 'description': p.description});
+                      final savedEntries = <PlanEntry>[];
+                      for (final e in p.entries) {
+                        final eid = await DatabaseHelper.instance.insertPlanEntry({'plan_id': pid, 'day_offset': e.dayOffset});
+                        final tmplList = <WorkoutTemplate>[];
+                        for (final tmpl in e.templates) {
+                          int tid;
+                          if (tmpl.id == null) {
+                            if (kIsWeb) {
+                              // On web, avoid persisting templates globally when adding them to a plan.
+                              tid = await DatabaseHelper.instance.nextId();
+                              await DatabaseHelper.instance.insertPlanEntryTemplate({'entry_id': eid, 'template_id': tid, 'template': tmpl.toMap()});
+                            } else {
+                              tid = await DatabaseHelper.instance.insertTemplate(tmpl.toMap());
+                              await DatabaseHelper.instance.insertPlanEntryTemplate({'entry_id': eid, 'template_id': tid});
+                            }
+                          } else {
+                            tid = tmpl.id!;
+                            await DatabaseHelper.instance.insertPlanEntryTemplate({'entry_id': eid, 'template_id': tid});
+                          }
+                          // create a copy with the assigned id
+                          tmplList.add(WorkoutTemplate(id: tid, title: tmpl.title, type: tmpl.type, minutes: tmpl.minutes, reps: tmpl.reps, calories: tmpl.calories, notes: tmpl.notes, time: tmpl.time));
+                        }
+                        savedEntries.add(PlanEntry(id: eid, dayOffset: e.dayOffset, templates: tmplList));
+                      }
+                      final savedPlan = WorkoutPlan(id: pid, name: p.name, description: p.description, entries: savedEntries);
+                      setState(() => _plans.insert(0, savedPlan));
                     }),
                   ),
                 );
@@ -238,32 +426,43 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                           child: Text('My Plans', style: TextStyle(fontSize: Responsive.fontSize(context, 18), fontWeight: FontWeight.w700)),
                         ),
                         Flexible(
-                          child: ListView.separated(
-                            shrinkWrap: true,
-                            itemCount: _plans.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1),
-                            itemBuilder: (ctx2, i) {
-                              final p = _plans[i];
-                              return ListTile(
-                                title: Text(p.name),
-                                subtitle: Text(p.description ?? ''),
-                                onTap: () async {
-                                  Navigator.of(c3).pop();
-                                  final start = await showDatePicker(context: context, initialDate: initialDate ?? DateTime.now(), firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 3650)));
-                                  if (start == null) return;
-                                  if (!mounted) return;
-                                  for (final e in p.entries) {
-                                    final entryDate = DateTime(start.year, start.month, start.day + e.dayOffset);
-                                    for (final tmpl in e.templates) {
-                                      final t = tmpl.time;
-                                      final d = t == null ? DateTime(entryDate.year, entryDate.month, entryDate.day, TimeOfDay.fromDateTime(DateTime.now()).hour, TimeOfDay.fromDateTime(DateTime.now()).minute) : DateTime(entryDate.year, entryDate.month, entryDate.day, t.hour, t.minute);
-                                      setState(() => _workouts.insert(0, Workout(title: tmpl.title, type: tmpl.type, minutes: tmpl.minutes, reps: tmpl.reps, calories: tmpl.calories, notes: tmpl.notes, date: d)));
-                                    }
-                                  }
-                                },
-                              );
-                            },
-                          ),
+                          child: _plans.isEmpty
+                              ? Padding(
+                                  padding: const EdgeInsets.all(24.0),
+                                  child: Center(child: Text('No workout plans available. Create a new plan from the Add menu to schedule workouts.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[600]))),
+                                )
+                              : ListView.separated(
+                                  shrinkWrap: true,
+                                  itemCount: _plans.length,
+                                  separatorBuilder: (_, __) => const Divider(height: 1),
+                                  itemBuilder: (ctx2, i) {
+                                    final p = _plans[i];
+                                    return ListTile(
+                                      title: Text(p.name),
+                                      subtitle: Text(p.description ?? ''),
+                                      onTap: () async {
+                                        Navigator.of(c3).pop();
+                                        final firstDate = DateTime.now();
+                                        var init = (initialDate ?? DateTime.now());
+                                        init = _clampToToday(init);
+                                        final start = await showDatePicker(context: context, initialDate: init, firstDate: firstDate, lastDate: DateTime.now().add(const Duration(days: 3650)));
+                                        if (start == null) return;
+                                        if (!mounted) return;
+                                                  for (final e in p.entries) {
+                                                    final entryDate = DateTime(start.year, start.month, start.day + e.dayOffset);
+                                                    for (final tmpl in e.templates) {
+                                                      final t = tmpl.time;
+                                                      final d = t == null ? DateTime(entryDate.year, entryDate.month, entryDate.day, TimeOfDay.fromDateTime(DateTime.now()).hour, TimeOfDay.fromDateTime(DateTime.now()).minute) : DateTime(entryDate.year, entryDate.month, entryDate.day, t.hour, t.minute);
+                                                      final w = Workout(title: tmpl.title, type: tmpl.type, minutes: tmpl.minutes, reps: tmpl.reps, calories: tmpl.calories, notes: tmpl.notes, date: d);
+                                                      final id = await DatabaseHelper.instance.insertWorkout(w.toMap());
+                                                      final newW = Workout(id: id, title: w.title, type: w.type, minutes: w.minutes, reps: w.reps, calories: w.calories, notes: w.notes, date: w.date);
+                                                      setState(() => _workouts.insert(0, newW));
+                                                    }
+                                                  }
+                                      },
+                                    );
+                                  },
+                                ),
                         ),
                       ],
                     ),
@@ -304,9 +503,14 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                         builder: (c2) => Padding(
                           padding: EdgeInsets.only(bottom: MediaQuery.of(c2).viewInsets.bottom),
                           child: _TemplateForm(
-                            onSave: (t) {
-                              setState(() => _templates.insert(0, t));
-                              Navigator.of(c2).pop();
+                            onSave: (t) async {
+                              // persist new template then update UI
+                              final nav = Navigator.of(c2);
+                              final tid = await DatabaseHelper.instance.insertTemplate(t.toMap());
+                              if (!mounted) return;
+                              final newT = WorkoutTemplate(id: tid, title: t.title, type: t.type, minutes: t.minutes, reps: t.reps, calories: t.calories, notes: t.notes, time: t.time);
+                              setState(() => _templates.insert(0, newT));
+                              nav.pop();
                             },
                           ),
                         ),
@@ -318,48 +522,72 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
               ),
             ),
             Flexible(
-              child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: _templates.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
-                itemBuilder: (ctx, i) {
-                  final t = _templates[i];
-                  return ListTile(
-                    title: Text(t.title),
-                    subtitle: Text('${t.type} • ${t.minutes} min • ${t.calories} kcal'),
-                    trailing: PopupMenuButton<String>(
-                      onSelected: (action) async {
-                          if (action == 'add') {
-                          // close templates manager, then schedule template instance to a chosen date/time
-                          Navigator.of(context).pop();
-                          final scheduled = await _scheduleTemplate(t);
-                          if (!mounted) return;
-                          if (scheduled != null) {
-                            setState(() => _workouts.insert(0, Workout(title: t.title, type: t.type, minutes: t.minutes, reps: t.reps, calories: t.calories, notes: t.notes, date: scheduled)));
-                          }
-                        } else if (action == 'edit') {
-                          Navigator.of(context).pop();
-                          showModalBottomSheet(
-                            context: context,
-                            isScrollControlled: true,
-                            builder: (c2) => Padding(
-                              padding: EdgeInsets.only(bottom: MediaQuery.of(c2).viewInsets.bottom),
-                              child: _TemplateForm(initial: t, onSave: (updated) {
-                                setState(() => _templates[i] = updated);
-                                Navigator.of(c2).pop();
-                              }),
-                            ),
-                          );
-                        } else if (action == 'delete') {
-                          setState(() => _templates.removeAt(i));
-                        }
-                      },
-                      itemBuilder: (_) => [
-                        const PopupMenuItem(value: 'add', child: Text('Schedule...')),
-                        const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                        const PopupMenuItem(value: 'delete', child: Text('Delete')),
-                      ],
-                    ),
+              child: StatefulBuilder(
+                builder: (modalCtx, modalSetState) {
+                  if (_templates.isEmpty) {
+                    return Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Center(child: Text('No saved workouts. Create one from the Add menu or save a workout to My Workouts.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[600]))),
+                    );
+                  }
+                  return ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: _templates.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (ctx, i) {
+                      final t = _templates[i];
+                      return ListTile(
+                        title: Text(t.title),
+                        subtitle: Text('${t.type} • ${t.minutes} min • ${t.calories} kcal'),
+                        trailing: PopupMenuButton<String>(
+                          onSelected: (action) async {
+                            if (action == 'add') {
+                              // close templates manager, then schedule template instance to a chosen date/time
+                              Navigator.of(context).pop();
+                              final scheduled = await _scheduleTemplate(t);
+                              if (!mounted) return;
+                              if (scheduled != null) {
+                                final w = Workout(title: t.title, type: t.type, minutes: t.minutes, reps: t.reps, calories: t.calories, notes: t.notes, date: scheduled);
+                                final id = await DatabaseHelper.instance.insertWorkout(w.toMap());
+                                final newW = Workout(id: id, title: w.title, type: w.type, minutes: w.minutes, reps: w.reps, calories: w.calories, notes: w.notes, date: w.date);
+                                setState(() => _workouts.insert(0, newW));
+                              }
+                            } else if (action == 'edit') {
+                              Navigator.of(context).pop();
+                              showModalBottomSheet(
+                                context: context,
+                                isScrollControlled: true,
+                                builder: (c2) => Padding(
+                                  padding: EdgeInsets.only(bottom: MediaQuery.of(c2).viewInsets.bottom),
+                                  child: _TemplateForm(initial: t, onSave: (updated) {
+                                    // update modal and parent state
+                                    modalSetState(() => _templates[i] = updated);
+                                    setState(() {});
+                                    Navigator.of(c2).pop();
+                                  }),
+                                ),
+                              );
+                            } else if (action == 'delete') {
+                              if (i >= 0 && i < _templates.length) {
+                                final toRemove = _templates.removeAt(i);
+                                modalSetState(() {});
+                                if (toRemove.id != null) await DatabaseHelper.instance.deleteTemplate(toRemove.id!);
+                                if (!mounted) return;
+                                // ensure canonical state
+                                await _loadFromDb();
+                                modalSetState(() {});
+                                setState(() {});
+                              }
+                            }
+                          },
+                          itemBuilder: (_) => [
+                            const PopupMenuItem(value: 'add', child: Text('Schedule...')),
+                            const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                            const PopupMenuItem(value: 'delete', child: Text('Delete')),
+                          ],
+                        ),
+                      );
+                    },
                   );
                 },
               ),
@@ -396,9 +624,29 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                         isScrollControlled: true,
                         builder: (c2) => Padding(
                           padding: EdgeInsets.only(bottom: MediaQuery.of(c2).viewInsets.bottom),
-                          child: _PlanForm(onSave: (p) {
-                            setState(() => _plans.insert(0, p));
-                            Navigator.of(c2).pop();
+                          child: _PlanForm(onSave: (p) async {
+                            final nav = Navigator.of(c2);
+                            final pid = await DatabaseHelper.instance.insertPlan({'name': p.name, 'description': p.description});
+                            final savedEntries = <PlanEntry>[];
+                            for (final e in p.entries) {
+                              final eid = await DatabaseHelper.instance.insertPlanEntry({'plan_id': pid, 'day_offset': e.dayOffset});
+                              final tmplList = <WorkoutTemplate>[];
+                              for (final tmpl in e.templates) {
+                                int tid;
+                                if (tmpl.id == null) {
+                                  tid = await DatabaseHelper.instance.insertTemplate(tmpl.toMap());
+                                } else {
+                                  tid = tmpl.id!;
+                                }
+                                await DatabaseHelper.instance.insertPlanEntryTemplate({'entry_id': eid, 'template_id': tid});
+                                tmplList.add(WorkoutTemplate(id: tid, title: tmpl.title, type: tmpl.type, minutes: tmpl.minutes, reps: tmpl.reps, calories: tmpl.calories, notes: tmpl.notes, time: tmpl.time));
+                              }
+                              savedEntries.add(PlanEntry(id: eid, dayOffset: e.dayOffset, templates: tmplList));
+                            }
+                            final savedPlan = WorkoutPlan(id: pid, name: p.name, description: p.description, entries: savedEntries);
+                            if (!mounted) return;
+                            setState(() => _plans.insert(0, savedPlan));
+                            nav.pop();
                           }),
                         ),
                       );
@@ -409,53 +657,126 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
               ),
             ),
             Flexible(
-              child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: _plans.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
-                itemBuilder: (ctx, i) {
-                  final p = _plans[i];
-                  return ListTile(
-                    title: Text(p.name),
-                    subtitle: Text(p.description ?? ''),
-                    onTap: () => _previewPlan(p),
-                    trailing: PopupMenuButton<String>(
-                      onSelected: (action) async {
-                        if (action == 'schedule') {
-                          Navigator.of(context).pop();
-                          final start = await showDatePicker(context: context, initialDate: _selectedDate ?? DateTime.now(), firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 3650)));
-                          if (start == null) return;
-                          // schedule entries sequentially by dayOffset; use entry.template.time when present
-                          for (final e in p.entries) {
-                            final entryDate = DateTime(start.year, start.month, start.day + e.dayOffset);
-                            for (final tmpl in e.templates) {
-                              final t = tmpl.time;
-                              final d = t == null ? DateTime(entryDate.year, entryDate.month, entryDate.day, TimeOfDay.fromDateTime(DateTime.now()).hour, TimeOfDay.fromDateTime(DateTime.now()).minute) : DateTime(entryDate.year, entryDate.month, entryDate.day, t.hour, t.minute);
-                              setState(() => _workouts.insert(0, Workout(title: tmpl.title, type: tmpl.type, minutes: tmpl.minutes, reps: tmpl.reps, calories: tmpl.calories, notes: tmpl.notes, date: d)));
+              child: StatefulBuilder(
+                builder: (modalCtx, modalSetState) {
+                  if (_plans.isEmpty) {
+                    return Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Center(child: Text('No workout plans yet. Create one using "Create new workout plan".', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[600]))),
+                    );
+                  }
+                  return ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: _plans.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (ctx, i) {
+                      final p = _plans[i];
+                      return ListTile(
+                        title: Text(p.name),
+                        subtitle: Text(p.description ?? ''),
+                        onTap: () => _previewPlan(p),
+                        trailing: PopupMenuButton<String>(
+                          onSelected: (action) async {
+                            if (action == 'schedule') {
+                              Navigator.of(context).pop();
+                              final firstDate = DateTime.now();
+                              var init = (_selectedDate ?? DateTime.now());
+                              init = _clampToToday(init);
+                              final start = await showDatePicker(context: context, initialDate: init, firstDate: firstDate, lastDate: DateTime.now().add(const Duration(days: 3650)));
+                              if (start == null) return;
+                              for (final e in p.entries) {
+                                final entryDate = DateTime(start.year, start.month, start.day + e.dayOffset);
+                                for (final tmpl in e.templates) {
+                                  final t = tmpl.time;
+                                  final d = t == null ? DateTime(entryDate.year, entryDate.month, entryDate.day, TimeOfDay.fromDateTime(DateTime.now()).hour, TimeOfDay.fromDateTime(DateTime.now()).minute) : DateTime(entryDate.year, entryDate.month, entryDate.day, t.hour, t.minute);
+                                  final w = Workout(title: tmpl.title, type: tmpl.type, minutes: tmpl.minutes, reps: tmpl.reps, calories: tmpl.calories, notes: tmpl.notes, date: d);
+                                  final id = await DatabaseHelper.instance.insertWorkout(w.toMap());
+                                  final newW = Workout(id: id, title: w.title, type: w.type, minutes: w.minutes, reps: w.reps, calories: w.calories, notes: w.notes, date: w.date);
+                                  setState(() => _workouts.insert(0, newW));
+                                }
+                              }
+                            } else if (action == 'edit') {
+                              Navigator.of(context).pop();
+                              showModalBottomSheet(
+                                context: context,
+                                isScrollControlled: true,
+                                builder: (c2) => Padding(
+                                  padding: EdgeInsets.only(bottom: MediaQuery.of(c2).viewInsets.bottom),
+                                  child: _PlanForm(initial: p, onSave: (updated) async {
+                                    if (p.id != null) {
+                                      final planMap = {'name': updated.name, 'description': updated.description};
+                                      final entriesMaps = updated.entries.map((e) {
+                                        return {
+                                          'id': e.id,
+                                          'day_offset': e.dayOffset,
+                                          'templates': e.templates.map((t) => t.toMap()).toList(),
+                                        };
+                                      }).toList();
+                                      await DatabaseHelper.instance.updatePlanWithEntries(p.id!, planMap, entriesMaps);
+                                      final full = await DatabaseHelper.instance.getFullPlans();
+                                      final found = full.map((pmap) {
+                                        final planRow = pmap['plan'] as Map<String, Object?>;
+                                        final entriesRaw = pmap['entries'] as List;
+                                        final entries = entriesRaw.map<PlanEntry>((er) {
+                                          final entry = er['entry'] as Map<String, Object?>;
+                                          final templatesRaw = er['templates'] as List;
+                                          final templates = templatesRaw.map<WorkoutTemplate>((t) => WorkoutTemplate.fromMap(t as Map<String, Object?>)).toList();
+                                          return PlanEntry(id: entry['id'] as int?, dayOffset: entry['day_offset'] as int, templates: templates);
+                                        }).toList();
+                                        return WorkoutPlan(id: planRow['id'] as int?, name: planRow['name'] as String, description: planRow['description'] as String?, entries: entries);
+                                      }).toList();
+                                      setState(() => _plans[i] = found.firstWhere((fp) => fp.id == p.id, orElse: () => updated));
+                                    } else {
+                                      final pid = await DatabaseHelper.instance.insertPlan({'name': updated.name, 'description': updated.description});
+                                      final savedEntries = <PlanEntry>[];
+                                      for (final e in updated.entries) {
+                                        final eid = await DatabaseHelper.instance.insertPlanEntry({'plan_id': pid, 'day_offset': e.dayOffset});
+                                        final tmplList = <WorkoutTemplate>[];
+                                        for (final tmpl in e.templates) {
+                                          int tid;
+                                          if (tmpl.id == null) {
+                                            if (kIsWeb) {
+                                              tid = await DatabaseHelper.instance.nextId();
+                                              await DatabaseHelper.instance.insertPlanEntryTemplate({'entry_id': eid, 'template_id': tid, 'template': tmpl.toMap()});
+                                            } else {
+                                              tid = await DatabaseHelper.instance.insertTemplate(tmpl.toMap());
+                                              await DatabaseHelper.instance.insertPlanEntryTemplate({'entry_id': eid, 'template_id': tid});
+                                            }
+                                          } else {
+                                            tid = tmpl.id!;
+                                            await DatabaseHelper.instance.insertPlanEntryTemplate({'entry_id': eid, 'template_id': tid});
+                                          }
+                                          tmplList.add(WorkoutTemplate(id: tid, title: tmpl.title, type: tmpl.type, minutes: tmpl.minutes, reps: tmpl.reps, calories: tmpl.calories, notes: tmpl.notes, time: tmpl.time));
+                                        }
+                                        savedEntries.add(PlanEntry(id: eid, dayOffset: e.dayOffset, templates: tmplList));
+                                      }
+                                      final savedPlan = WorkoutPlan(id: pid, name: updated.name, description: updated.description, entries: savedEntries);
+                                      setState(() => _plans[i] = savedPlan);
+                                    }
+                                  }),
+                                ),
+                              );
+                            } else if (action == 'delete') {
+                              if (i >= 0 && i < _plans.length) {
+                                // optimistic remove in modal
+                                final removed = _plans.removeAt(i);
+                                modalSetState(() {});
+                                if (removed.id != null) await DatabaseHelper.instance.deletePlan(removed.id!);
+                                // reload canonical state and refresh UI
+                                await _loadFromDb();
+                                modalSetState(() {});
+                                setState(() {});
+                              }
                             }
-                          }
-                        } else if (action == 'edit') {
-                          Navigator.of(context).pop();
-                          showModalBottomSheet(
-                            context: context,
-                            isScrollControlled: true,
-                            builder: (c2) => Padding(
-                              padding: EdgeInsets.only(bottom: MediaQuery.of(c2).viewInsets.bottom),
-                              child: _PlanForm(initial: p, onSave: (updated) {
-                                  setState(() => _plans[i] = updated);
-                                }),
-                            ),
-                          );
-                        } else if (action == 'delete') {
-                          setState(() => _plans.removeAt(i));
-                        }
-                      },
-                      itemBuilder: (_) => [
-                        const PopupMenuItem(value: 'schedule', child: Text('Schedule')),
-                        const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                        const PopupMenuItem(value: 'delete', child: Text('Delete')),
-                      ],
-                    ),
+                          },
+                          itemBuilder: (_) => [
+                            const PopupMenuItem(value: 'schedule', child: Text('Schedule')),
+                            const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                            const PopupMenuItem(value: 'delete', child: Text('Delete')),
+                          ],
+                        ),
+                      );
+                    },
                   );
                 },
               ),
@@ -522,7 +843,14 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                                       ),
                                     );
                                     if (updated != null) {
-                                      setState(() => p.entries[i].templates[ti] = updated);
+                                      var finalUpdated = updated;
+                                      if (finalUpdated.id == null) {
+                                        final newTid = await DatabaseHelper.instance.insertTemplate(finalUpdated.toMap());
+                                        finalUpdated = WorkoutTemplate(id: newTid, title: finalUpdated.title, type: finalUpdated.type, minutes: finalUpdated.minutes, reps: finalUpdated.reps, calories: finalUpdated.calories, notes: finalUpdated.notes, time: finalUpdated.time);
+                                      } else {
+                                        await DatabaseHelper.instance.updateTemplate(finalUpdated.id!, finalUpdated.toMap());
+                                      }
+                                      setState(() => p.entries[i].templates[ti] = finalUpdated);
                                     }
                                     Future.delayed(const Duration(milliseconds: 50), () => _previewPlan(p));
                                   },
@@ -530,13 +858,18 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                                 IconButton(
                                   icon: const Icon(Icons.delete),
                                   onPressed: () {
-                                    setState(() => p.entries[i].templates.removeAt(ti));
+                                    if (i >= 0 && i < p.entries.length) {
+                                      final entryTemplates = p.entries[i].templates;
+                                      if (ti >= 0 && ti < entryTemplates.length) {
+                                        setState(() => entryTemplates.removeAt(ti));
+                                      }
+                                    }
                                     Future.delayed(const Duration(milliseconds: 50), () => _previewPlan(p));
                                   },
                                 ),
                               ]),
                             );
-                          }).toList(),
+                          }),
                           const SizedBox(height: 6),
                           Align(
                             alignment: Alignment.centerRight,
@@ -552,7 +885,21 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                                     child: _TemplateForm(onSave: (t) => Navigator.of(c4).pop(t)),
                                   ),
                                 );
-                                if (created != null) setState(() => p.entries[i].templates.add(created));
+                                if (created != null) {
+                                  var finalCreated = created;
+                                  if (finalCreated.id == null) {
+                                    if (kIsWeb) {
+                                      final newTid = await DatabaseHelper.instance.nextId();
+                                      // embed template into plan entry on web (don't persist globally)
+                                      await DatabaseHelper.instance.insertPlanEntryTemplate({'entry_id': p.entries[i].id ?? 0, 'template_id': newTid, 'template': finalCreated.toMap()});
+                                      finalCreated = WorkoutTemplate(id: newTid, title: finalCreated.title, type: finalCreated.type, minutes: finalCreated.minutes, reps: finalCreated.reps, calories: finalCreated.calories, notes: finalCreated.notes, time: finalCreated.time);
+                                    } else {
+                                      final newTid = await DatabaseHelper.instance.insertTemplate(finalCreated.toMap());
+                                      finalCreated = WorkoutTemplate(id: newTid, title: finalCreated.title, type: finalCreated.type, minutes: finalCreated.minutes, reps: finalCreated.reps, calories: finalCreated.calories, notes: finalCreated.notes, time: finalCreated.time);
+                                    }
+                                  }
+                                  setState(() => p.entries[i].templates.add(finalCreated));
+                                }
                                 Future.delayed(const Duration(milliseconds: 50), () => _previewPlan(p));
                               },
                               child: const Text('Add workout to this day'),
@@ -610,12 +957,18 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                         padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
                         child: _EditWorkoutForm(
                           workout: w,
-                          onSave: (updated) {
+                          onSave: (updated) async {
+                            final nav = Navigator.of(ctx);
+                            // persist the workout update if it has an id
+                            if (updated.id != null) {
+                              await DatabaseHelper.instance.updateWorkout(updated.id!, updated.toMap());
+                            }
+                            if (!mounted) return;
                             setState(() {
                               final idx = _workouts.indexOf(w);
                               if (idx != -1) _workouts[idx] = updated;
                             });
-                            Navigator.of(ctx).pop();
+                            nav.pop();
                           },
                         ),
                       ),
@@ -624,9 +977,19 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                   child: const Text('Edit'),
                 ),
                 TextButton(
-                  onPressed: () {
-                    setState(() => _workouts.remove(w));
-                    Navigator.of(context).pop();
+                  onPressed: () async {
+                    final nav = Navigator.of(context);
+                    // optimistic UI update: remove immediately so user sees instant change
+                    if (w.id != null) {
+                      if (mounted) setState(() => _workouts.removeWhere((item) => item.id == w.id));
+                      await DatabaseHelper.instance.deleteWorkout(w.id!);
+                      // reload canonical data to ensure consistency with storage
+                      await _loadFromDb();
+                    } else {
+                      if (mounted) setState(() => _workouts.remove(w));
+                    }
+                    // close preview
+                    nav.pop();
                   },
                   child: const Text('Delete', style: TextStyle(color: Colors.red)),
                 ),
@@ -641,6 +1004,7 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
 
   Future<DateTime?> _scheduleTemplate(WorkoutTemplate t, {DateTime? baseDate}) async {
     DateTime initialDate = baseDate ?? _selectedDate ?? DateTime.now();
+    initialDate = _clampToToday(initialDate);
     TimeOfDay initialTime = t.time ?? TimeOfDay.now();
 
     DateTime? chosenDate = await showDatePicker(context: context, initialDate: initialDate, firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 3650)));
@@ -871,8 +1235,15 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                     padding: const EdgeInsets.only(bottom: 8.0),
                     child: WorkoutCard(
                       workout: w,
-                      onDelete: () {
-                        setState(() => _workouts.remove(w));
+                      onDelete: () async {
+                            if (w.id != null) {
+                              // optimistic removal from UI
+                              if (mounted) setState(() => _workouts.removeWhere((item) => item.id == w.id));
+                              await DatabaseHelper.instance.deleteWorkout(w.id!);
+                              await _loadFromDb();
+                            } else {
+                              if (mounted) setState(() => _workouts.remove(w));
+                            }
                       },
                       onTap: () => _openPreview(w),
                     ),
@@ -890,7 +1261,7 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
 class _EditWorkoutForm extends StatefulWidget {
   final Workout workout;
   final void Function(Workout) onSave;
-  _EditWorkoutForm({Key? key, required this.workout, required this.onSave}) : super(key: key);
+  const _EditWorkoutForm({Key? key, required this.workout, required this.onSave}) : super(key: key);
 
   @override
   State<_EditWorkoutForm> createState() => _EditWorkoutFormState();
@@ -1083,10 +1454,10 @@ class WorkoutCard extends StatelessWidget {
 
 
 class _AddWorkoutForm extends StatefulWidget {
-  final void Function(Workout) onAdd;
-  final void Function(WorkoutTemplate)? onSaveTemplate;
+  final Future<void> Function(Workout) onAdd;
+  final Future<void> Function(WorkoutTemplate)? onSaveTemplate;
   final DateTime? initialDate;
-  _AddWorkoutForm({Key? key, required this.onAdd, this.onSaveTemplate, this.initialDate}) : super(key: key);
+  const _AddWorkoutForm({Key? key, required this.onAdd, this.onSaveTemplate, this.initialDate}) : super(key: key);
 
   @override
   State<_AddWorkoutForm> createState() => _AddWorkoutFormState();
@@ -1174,7 +1545,7 @@ class _AddWorkoutFormState extends State<_AddWorkoutForm> {
     _caloriesCtl.text = c.toString();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     final title = _titleCtl.text.trim();
     final minutes = int.tryParse(_minutesCtl.text) ?? 0;
     final manualCalories = int.tryParse(_caloriesCtl.text);
@@ -1195,10 +1566,10 @@ class _AddWorkoutFormState extends State<_AddWorkoutForm> {
       date: combined,
     );
 
-    widget.onAdd(workout);
+    await widget.onAdd(workout);
 
     if (_saveAsTemplate && widget.onSaveTemplate != null) {
-      widget.onSaveTemplate!(WorkoutTemplate(title: workout.title, type: workout.type, minutes: workout.minutes, reps: workout.reps, calories: workout.calories, notes: workout.notes));
+      await widget.onSaveTemplate!(WorkoutTemplate(title: workout.title, type: workout.type, minutes: workout.minutes, reps: workout.reps, calories: workout.calories, notes: workout.notes));
     }
   }
 
@@ -1283,8 +1654,8 @@ class _AddWorkoutFormState extends State<_AddWorkoutForm> {
 
 class _PlanForm extends StatefulWidget {
   final WorkoutPlan? initial;
-  final void Function(WorkoutPlan) onSave;
-  _PlanForm({Key? key, this.initial, required this.onSave}) : super(key: key);
+  final Future<void> Function(WorkoutPlan) onSave;
+  const _PlanForm({Key? key, this.initial, required this.onSave}) : super(key: key);
 
   @override
   State<_PlanForm> createState() => _PlanFormState();
@@ -1295,6 +1666,7 @@ class _PlanFormState extends State<_PlanForm> {
   late final TextEditingController _descCtl = TextEditingController(text: widget.initial?.description ?? '');
   List<PlanEntry> _entries = [];
   bool _isDirty = false;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -1334,10 +1706,23 @@ class _PlanFormState extends State<_PlanForm> {
     });
   }
 
-  void _save() {
+  Future<bool> _save() async {
     final p = WorkoutPlan(name: _nameCtl.text.trim(), description: _descCtl.text.trim().isEmpty ? null : _descCtl.text.trim(), entries: _entries);
-    widget.onSave(p);
-    _isDirty = false;
+    // run caller save and surface any error to the user instead of letting it bubble
+    setState(() => _saving = true);
+    try {
+      await widget.onSave(p);
+      _isDirty = false;
+      return true;
+    } catch (e) {
+      // show a brief error and keep the form open so user can retry
+      try {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to save plan: ${e.toString()}')));
+      } catch (_) {}
+      return false;
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -1356,8 +1741,9 @@ class _PlanFormState extends State<_PlanForm> {
               Row(
                 children: [
                   IconButton(onPressed: () async {
+                    final nav = Navigator.of(context);
                     final ok = await _onAttemptClose();
-                    if (ok) Navigator.of(context).pop();
+                    if (ok) nav.pop();
                   }, icon: const Icon(Icons.arrow_back)),
                   Expanded(child: Text(widget.initial == null ? 'New Plan' : 'Edit Plan', style: TextStyle(fontSize: Responsive.fontSize(context, 18), fontWeight: FontWeight.w700))),
                 ],
@@ -1383,7 +1769,7 @@ class _PlanFormState extends State<_PlanForm> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  Row(children: [Expanded(child: Text('Day ${e.dayOffset + 1}', style: const TextStyle(fontWeight: FontWeight.w700))), IconButton(onPressed: () { setState(() => _entries.removeAt(idx)); _markDirty(); }, icon: const Icon(Icons.delete))]),
+                                  Row(children: [Expanded(child: Text('Day ${e.dayOffset + 1}', style: const TextStyle(fontWeight: FontWeight.w700))), IconButton(onPressed: () { if (idx >= 0 && idx < _entries.length) { setState(() => _entries.removeAt(idx)); _markDirty(); } }, icon: const Icon(Icons.delete))]),
                                   const SizedBox(height: 8),
                                   ...e.templates.asMap().entries.map((me2) {
                                     final tidx = me2.key;
@@ -1404,13 +1790,27 @@ class _PlanFormState extends State<_PlanForm> {
                                                 child: _TemplateForm(initial: tmpl, onSave: (t) => Navigator.of(c3).pop(t)),
                                               ),
                                             );
-                                            if (updated != null) setState(() { _entries[idx].templates[tidx] = updated; _markDirty(); });
+                                            if (updated != null) {
+                                              var finalUpdated = updated;
+                                              if (finalUpdated.id == null) {
+                                                if (kIsWeb) {
+                                                  final newTid = await DatabaseHelper.instance.nextId();
+                                                  finalUpdated = WorkoutTemplate(id: newTid, title: finalUpdated.title, type: finalUpdated.type, minutes: finalUpdated.minutes, reps: finalUpdated.reps, calories: finalUpdated.calories, notes: finalUpdated.notes, time: finalUpdated.time);
+                                                } else {
+                                                  final newTid = await DatabaseHelper.instance.insertTemplate(finalUpdated.toMap());
+                                                  finalUpdated = WorkoutTemplate(id: newTid, title: finalUpdated.title, type: finalUpdated.type, minutes: finalUpdated.minutes, reps: finalUpdated.reps, calories: finalUpdated.calories, notes: finalUpdated.notes, time: finalUpdated.time);
+                                                }
+                                              } else {
+                                                await DatabaseHelper.instance.updateTemplate(finalUpdated.id!, finalUpdated.toMap());
+                                              }
+                                              setState(() { _entries[idx].templates[tidx] = finalUpdated; _markDirty(); });
+                                            }
                                           },
                                         ),
-                                        IconButton(icon: const Icon(Icons.delete), onPressed: () => setState(() { _entries[idx].templates.removeAt(tidx); _markDirty(); })),
+                                        IconButton(icon: const Icon(Icons.delete), onPressed: () { if (idx >= 0 && idx < _entries.length) { final entryTemplates = _entries[idx].templates; if (tidx >= 0 && tidx < entryTemplates.length) { setState(() { entryTemplates.removeAt(tidx); _markDirty(); }); } } }),
                                       ]),
-                                    );
-                                  }).toList(),
+                                        );
+                                      }),
                                   Align(alignment: Alignment.centerRight, child: TextButton(onPressed: () async {
                                     final created = await showModalBottomSheet<WorkoutTemplate>(
                                       context: context,
@@ -1420,7 +1820,19 @@ class _PlanFormState extends State<_PlanForm> {
                                         child: _TemplateForm(onSave: (t) => Navigator.of(c4).pop(t)),
                                       ),
                                     );
-                                    if (created != null) setState(() { _entries[idx].templates.add(created); _markDirty(); });
+                                    if (created != null) {
+                                      var finalCreated = created;
+                                    if (finalCreated.id == null) {
+                                      if (kIsWeb) {
+                                        final newTid = await DatabaseHelper.instance.nextId();
+                                        finalCreated = WorkoutTemplate(id: newTid, title: finalCreated.title, type: finalCreated.type, minutes: finalCreated.minutes, reps: finalCreated.reps, calories: finalCreated.calories, notes: finalCreated.notes, time: finalCreated.time);
+                                      } else {
+                                        final newTid = await DatabaseHelper.instance.insertTemplate(finalCreated.toMap());
+                                        finalCreated = WorkoutTemplate(id: newTid, title: finalCreated.title, type: finalCreated.type, minutes: finalCreated.minutes, reps: finalCreated.reps, calories: finalCreated.calories, notes: finalCreated.notes, time: finalCreated.time);
+                                      }
+                                      }
+                                      setState(() { _entries[idx].templates.add(finalCreated); _markDirty(); });
+                                    }
                                   }, child: const Text('Add workout to this day'))),
                                 ],
                               ),
@@ -1431,7 +1843,16 @@ class _PlanFormState extends State<_PlanForm> {
               ),
 
               const SizedBox(height: 8),
-              Row(children: [TextButton(onPressed: _addEntry, child: const Text('Add entry')), const Spacer(), ElevatedButton(onPressed: () { _save(); Navigator.of(context).pop(); }, child: const Text('Save'))]),
+              Row(children: [TextButton(onPressed: _addEntry, child: const Text('Add entry')), const Spacer(), ElevatedButton(onPressed: _saving ? null : () async {
+                final ok = await _save();
+                if (!ok) return; // error shown in _save
+                if (!mounted) return;
+                // If the caller already popped the route inside onSave, don't pop again.
+                final route = ModalRoute.of(context);
+                if (route != null && route.isCurrent) {
+                  Navigator.of(context).pop();
+                }
+              }, child: _saving ? const SizedBox(width:20,height:20,child:CircularProgressIndicator(strokeWidth:2)) : const Text('Save'))]),
             ],
           ),
         ),
@@ -1443,7 +1864,7 @@ class _PlanFormState extends State<_PlanForm> {
 class _TemplateForm extends StatefulWidget {
   final WorkoutTemplate? initial;
   final void Function(WorkoutTemplate) onSave;
-  _TemplateForm({Key? key, this.initial, required this.onSave}) : super(key: key);
+  const _TemplateForm({Key? key, this.initial, required this.onSave}) : super(key: key);
 
   @override
   State<_TemplateForm> createState() => _TemplateFormState();
