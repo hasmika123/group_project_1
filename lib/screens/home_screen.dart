@@ -1,9 +1,101 @@
 import 'package:flutter/material.dart';
 import '../utils/responsive.dart';
-// SharedPreferences is no longer used for profile flag; profile presence is stored in SQLite
 import 'workout_log_screen.dart';
 import '../widgets/profile_setup_form.dart';
 import '../services/database_helper.dart';
+import 'progress_screen.dart';
+
+// Modal sheet for logging weight
+class _LogWeightSheet extends StatefulWidget {
+  @override
+  State<_LogWeightSheet> createState() => _LogWeightSheetState();
+}
+
+class _LogWeightSheetState extends State<_LogWeightSheet> {
+  final _formKey = GlobalKey<FormState>();
+  double? _weight;
+  DateTime _date = DateTime.now();
+  TimeOfDay _time = TimeOfDay.now();
+  bool _saving = false;
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _saving = true);
+    final dt = DateTime(_date.year, _date.month, _date.day, _time.hour, _time.minute);
+    await DatabaseHelper.instance.insertWeightLog({'weight': _weight, 'date': dt.millisecondsSinceEpoch});
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Weight logged')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Log Weight', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            TextFormField(
+              decoration: const InputDecoration(labelText: 'Weight (kg)', prefixIcon: Icon(Icons.monitor_weight)),
+              keyboardType: TextInputType.numberWithOptions(decimal: true),
+              validator: (v) {
+                final val = double.tryParse(v ?? '');
+                if (val == null || val <= 0) return 'Enter a valid weight';
+                return null;
+              },
+              onChanged: (v) => setState(() => _weight = double.tryParse(v)),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: _date,
+                        firstDate: DateTime(2000),
+                        lastDate: DateTime.now().add(const Duration(days: 1)),
+                      );
+                      if (picked != null) setState(() => _date = picked);
+                    },
+                    child: InputDecorator(
+                      decoration: const InputDecoration(labelText: 'Date'),
+                      child: Text('${_date.year}-${_date.month.toString().padLeft(2, '0')}-${_date.day.toString().padLeft(2, '0')}'),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: InkWell(
+                    onTap: () async {
+                      final picked = await showTimePicker(context: context, initialTime: _time);
+                      if (picked != null) setState(() => _time = picked);
+                    },
+                    child: InputDecorator(
+                      decoration: const InputDecoration(labelText: 'Time'),
+                      child: Text('${_time.format(context)}'),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _saving ? null : _submit,
+              child: _saving ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Log Weight'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -69,7 +161,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final titles = ['Home', 'Workouts', 'Calories'];
+  final titles = ['Home', 'Workouts', 'Calories', 'Progress'];
 
     return Scaffold(
       appBar: AppBar(
@@ -89,6 +181,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _HomeContent(onSelectTab: (i) => setState(() => _currentIndex = i), workoutActionNotifier: _workoutActionNotifier, calorieActionNotifier: _calorieActionNotifier),
           _WorkoutsTab(actionNotifier: _workoutActionNotifier),
           _CaloriesTab(actionNotifier: _calorieActionNotifier),
+          ProgressScreen(),
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
@@ -96,6 +189,7 @@ class _HomeScreenState extends State<HomeScreen> {
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
           BottomNavigationBarItem(icon: Icon(Icons.fitness_center), label: 'Workouts'),
           BottomNavigationBarItem(icon: Icon(Icons.restaurant), label: 'Calories'),
+          BottomNavigationBarItem(icon: Icon(Icons.show_chart), label: 'Progress'),
         ],
         currentIndex: _currentIndex,
         onTap: (idx) {
@@ -316,7 +410,6 @@ class _HomeContentState extends State<_HomeContent> {
                         final parent = context.findAncestorWidgetOfExactType<_HomeContent>();
                         if (parent is _HomeContent && parent.onSelectTab != null) {
                           parent.onSelectTab!(1);
-                          // after switching tabs, instruct the workouts tab to open the create-new sheet
                           WidgetsBinding.instance.addPostFrameCallback((_) {
                             parent.workoutActionNotifier?.value = 'create_new';
                           });
@@ -332,9 +425,7 @@ class _HomeContentState extends State<_HomeContent> {
                       icon: Icons.restaurant_menu,
                       label: 'Log Calories',
                       onTap: () {
-                        // switch to the Calories tab (index 2) via optional callback
                         final parent = context.findAncestorWidgetOfExactType<_HomeContent>();
-                        // if parent provided an onSelectTab callback, use it; otherwise fallback to navigation
                         if (parent is _HomeContent && parent.onSelectTab != null) {
                           parent.onSelectTab!(2);
                           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -349,13 +440,21 @@ class _HomeContentState extends State<_HomeContent> {
                   SizedBox(
                     width: itemWidth,
                     child: _QuickAction(
-                      icon: Icons.show_chart,
-                      label: 'View Progress',
+                      icon: Icons.monitor_weight,
+                      label: 'Log Weight',
                       onTap: () {
-                        Navigator.of(context).pushNamed('/progress');
+                        showModalBottomSheet(
+                          context: context,
+                          isScrollControlled: true,
+                          builder: (c) => Padding(
+                            padding: EdgeInsets.only(bottom: MediaQuery.of(c).viewInsets.bottom),
+                            child: _LogWeightSheet(),
+                          ),
+                        );
                       },
                     ),
                   ),
+                  // Removed 'View Progress' quick action
                 ],
               );
             },
@@ -406,10 +505,10 @@ class CalorieEntry {
       };
 
   static CalorieEntry fromMap(Map<String, Object?> m) => CalorieEntry(
-        id: m['id'] as int?,
-        name: m['name'] as String,
-        calories: m['calories'] as int,
-        date: DateTime.fromMillisecondsSinceEpoch(m['date'] as int),
+  id: m['id'] as int?,
+  name: m['name'] as String? ?? '',
+  calories: m['calories'] as int,
+  date: DateTime.fromMillisecondsSinceEpoch(m['date'] as int),
       );
 }
 

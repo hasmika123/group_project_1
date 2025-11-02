@@ -1,13 +1,44 @@
+
+import 'package:timezone/data/latest.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
 import 'package:flutter/material.dart';
 import 'screens/home_screen.dart';
 import 'theme.dart';
 import 'screens/workout_log_screen.dart';
 import 'screens/calorie_tracker_screen.dart';
-import 'screens/progress_screen.dart';
+// import 'screens/progress_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/calendar_screen.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+class NotificationService {
+  static final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+
+  Future<void> init() async {
+    tz.initializeTimeZones();
+    const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
+    final InitializationSettings initializationSettings = InitializationSettings(android: initializationSettingsAndroid);
+    await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+  }
+
+  Future<void> scheduleWorkoutNotification(DateTime dateTime, String workoutTitle) async {
+    // Only schedule notifications on non-web platforms
+    if (identical(0, 0.0)) return; // quick kIsWeb check for patch
+    await flutterLocalNotificationsPlugin.zonedSchedule(
+      dateTime.millisecondsSinceEpoch ~/ 1000,
+      'Workout Reminder',
+      'It\'s time for your workout: $workoutTitle',
+      tz.TZDateTime.from(dateTime, tz.local),
+      const NotificationDetails(android: AndroidNotificationDetails('workout_channel', 'Workout Reminders')),
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      matchDateTimeComponents: DateTimeComponents.time,
+    );
+  }
+}
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  NotificationService().init();
   runApp(const MyApp());
 }
 
@@ -26,7 +57,6 @@ class MyApp extends StatelessWidget {
       routes: {
         WorkoutLogScreen.routeName: (ctx) => const WorkoutLogScreen(),
         CalorieTrackerScreen.routeName: (ctx) => const CalorieTrackerScreen(),
-        ProgressScreen.routeName: (ctx) => const ProgressScreen(),
         ProfileScreen.routeName: (ctx) => const ProfileScreen(),
         CalendarScreen.routeName: (ctx) => const CalendarScreen(),
       },
@@ -114,7 +144,7 @@ class _MyHomePageState extends State<MyHomePage> {
       floatingActionButton: FloatingActionButton(
         onPressed: _incrementCounter,
         tooltip: 'Increment',
-        child: const Icon(Icons.add),
+    child: const Icon(Icons.add),
       ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
