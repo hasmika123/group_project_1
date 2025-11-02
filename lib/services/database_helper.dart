@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
@@ -7,6 +7,47 @@ import 'package:sqflite/sqflite.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class DatabaseHelper {
+  // Weight logs table name
+  static const weightLogsTable = 'weight_logs';
+  // Insert a weight log (web: SharedPreferences, native: SQLite)
+  Future<int> insertWeightLog(Map<String, Object?> values) async {
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      final listJson = prefs.getStringList('gp1_weight_logs') ?? <String>[];
+      final list = listJson.map((s) => jsonDecode(s) as Map<String, dynamic>).toList();
+      final newId = await _nextId();
+      final map = Map<String, Object?>.from(values)..['id'] = newId;
+      list.insert(0, map.cast<String, dynamic>());
+      await prefs.setStringList('gp1_weight_logs', list.map((m) => jsonEncode(m)).toList());
+      profileNotifier.value = profileNotifier.value + 1;
+      return newId;
+    }
+    final db = await database;
+    final id = await db.insert(weightLogsTable, values);
+    profileNotifier.value = profileNotifier.value + 1;
+    return id;
+  }
+
+  // Get weight logs (optionally for a specific day)
+  Future<List<Map<String, Object?>>> getWeightLogs({DateTime? day}) async {
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      final listJson = prefs.getStringList('gp1_weight_logs') ?? <String>[];
+      final list = listJson.map((s) => jsonDecode(s) as Map<String, dynamic>).toList();
+      if (day == null) return List<Map<String, Object?>>.from(list);
+      final start = DateTime(day.year, day.month, day.day).millisecondsSinceEpoch;
+      final end = DateTime(day.year, day.month, day.day, 23, 59, 59).millisecondsSinceEpoch;
+      return list.where((m) {
+        final d = m['date'] as int? ?? 0;
+        return d >= start && d <= end;
+      }).map((m) => m.cast<String, Object?>()).toList();
+    }
+    final db = await database;
+    if (day == null) return await db.query(weightLogsTable, orderBy: 'date DESC');
+    final start = DateTime(day.year, day.month, day.day).millisecondsSinceEpoch;
+    final end = DateTime(day.year, day.month, day.day, 23, 59, 59).millisecondsSinceEpoch;
+    return await db.query(weightLogsTable, where: 'date BETWEEN ? AND ?', whereArgs: [start, end], orderBy: 'date DESC');
+  }
   DatabaseHelper._privateConstructor();
   static final DatabaseHelper instance = DatabaseHelper._privateConstructor();
 
@@ -102,6 +143,14 @@ class DatabaseHelper {
         weight REAL,
         height REAL,
         bmr REAL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE $weightLogsTable (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        weight REAL NOT NULL,
+        date INTEGER NOT NULL
       )
     ''');
 

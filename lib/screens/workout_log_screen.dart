@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import '../utils/responsive.dart';
 import '../services/database_helper.dart';
+import '../main.dart';
 
 // Basic models used in this file
 class Workout {
@@ -302,6 +303,8 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                                         final id = await DatabaseHelper.instance.insertWorkout(w.toMap());
                                         final newW = Workout(id: id, title: w.title, type: w.type, minutes: w.minutes, reps: w.reps, calories: w.calories, notes: w.notes, date: w.date);
                                         setState(() => _workouts.insert(0, newW));
+                                        // Schedule notification
+                                        await NotificationService().scheduleWorkoutNotification(scheduled, w.title);
                                       }
                                     },
                                     trailing: PopupMenuButton<String>(
