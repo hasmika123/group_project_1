@@ -52,6 +52,7 @@ dev_dependencies:
   flutter_lints: ^5.0.0
 
 # For information on the generic Dart part of this file, see the
+  permission_handler: ^11.3.0
 # following page: https://dart.dev/tools/pub/pubspec
 
 # The following section is specific to Flutter packages.

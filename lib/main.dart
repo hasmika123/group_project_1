@@ -10,6 +10,7 @@ import 'screens/calorie_tracker_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/calendar_screen.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class NotificationService {
   static final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
@@ -19,6 +20,20 @@ class NotificationService {
     const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
     final InitializationSettings initializationSettings = InitializationSettings(android: initializationSettingsAndroid);
     await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+
+    // Create notification channel for Android
+    const AndroidNotificationChannel channel = AndroidNotificationChannel(
+      'workout_channel',
+      'Workout Reminders',
+      description: 'Reminders for scheduled workouts',
+      importance: Importance.high,
+    );
+    await flutterLocalNotificationsPlugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()?.createNotificationChannel(channel);
+
+    // Request notification permission on Android 13+
+    if (await Permission.notification.isDenied) {
+      await Permission.notification.request();
+    }
   }
 
   Future<void> scheduleWorkoutNotification(DateTime dateTime, String workoutTitle) async {

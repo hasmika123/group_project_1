@@ -445,9 +445,8 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                                       subtitle: Text(p.description ?? ''),
                                       onTap: () async {
                                         Navigator.of(c3).pop();
-                                        final firstDate = DateTime.now();
+                                        final firstDate = DateTime(2000);
                                         var init = (initialDate ?? DateTime.now());
-                                        init = _clampToToday(init);
                                         final start = await showDatePicker(context: context, initialDate: init, firstDate: firstDate, lastDate: DateTime.now().add(const Duration(days: 3650)));
                                         if (start == null) return;
                                         if (!mounted) return;
@@ -682,9 +681,8 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
                           onSelected: (action) async {
                             if (action == 'schedule') {
                               Navigator.of(context).pop();
-                              final firstDate = DateTime.now();
+                              final firstDate = DateTime(2000);
                               var init = (_selectedDate ?? DateTime.now());
-                              init = _clampToToday(init);
                               final start = await showDatePicker(context: context, initialDate: init, firstDate: firstDate, lastDate: DateTime.now().add(const Duration(days: 3650)));
                               if (start == null) return;
                               for (final e in p.entries) {
@@ -1007,10 +1005,14 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
 
   Future<DateTime?> _scheduleTemplate(WorkoutTemplate t, {DateTime? baseDate}) async {
     DateTime initialDate = baseDate ?? _selectedDate ?? DateTime.now();
-    initialDate = _clampToToday(initialDate);
     TimeOfDay initialTime = t.time ?? TimeOfDay.now();
 
-    DateTime? chosenDate = await showDatePicker(context: context, initialDate: initialDate, firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 3650)));
+    DateTime? chosenDate = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now().add(const Duration(days: 3650)),
+    );
     if (chosenDate == null) return null;
     if (!mounted) return null;
 
@@ -1143,7 +1145,8 @@ class _WorkoutLogScreenState extends State<WorkoutLogScreen> {
             // Grid -> use a Wrap with LayoutBuilder to avoid nested scrollable inside CustomScrollView
             LayoutBuilder(
               builder: (ctx, constraints) {
-                final tileWidth = (constraints.maxWidth - 8 * 2 - 6 * 8) / 7; // account for margins/padding
+                final tileWidthRaw = (constraints.maxWidth - 8 * 2 - 6 * 8) / 7; // account for margins/padding
+                final tileWidth = tileWidthRaw < 0 ? 0.0 : tileWidthRaw;
                 return Wrap(
                   alignment: WrapAlignment.start,
                   children: dayWidgets.map((w) => SizedBox(width: tileWidth, child: w)).toList(),

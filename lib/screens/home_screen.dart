@@ -396,13 +396,15 @@ class _HomeContentState extends State<_HomeContent> {
               final spacing = 12.0;
               final totalSpacing = spacing * (cols - 1);
               final itemWidth = (maxW - totalSpacing) / cols;
+              // Prevent negative width
+              final safeItemWidth = itemWidth < 0 ? 0.0 : itemWidth;
 
               return Wrap(
                 spacing: spacing,
                 runSpacing: 12,
                 children: [
                   SizedBox(
-                    width: itemWidth,
+                    width: safeItemWidth,
                     child: _QuickAction(
                       icon: Icons.add_circle_outline,
                       label: 'Add Workout',
@@ -420,7 +422,7 @@ class _HomeContentState extends State<_HomeContent> {
                     ),
                   ),
                   SizedBox(
-                    width: itemWidth,
+                    width: safeItemWidth,
                     child: _QuickAction(
                       icon: Icons.restaurant_menu,
                       label: 'Log Calories',
@@ -438,7 +440,7 @@ class _HomeContentState extends State<_HomeContent> {
                     ),
                   ),
                   SizedBox(
-                    width: itemWidth,
+                    width: safeItemWidth,
                     child: _QuickAction(
                       icon: Icons.monitor_weight,
                       label: 'Log Weight',

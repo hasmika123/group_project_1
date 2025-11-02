@@ -485,7 +485,7 @@ class _ProgressScreenState extends State<ProgressScreen> {
                                     child: Center(child: Text('Not enough weight data for chart')), // At least 2 points required
                                   );
                                 }
-                                final logs = snapshot.data!..sort((a, b) => ((a['date'] as int?) ?? 0).compareTo((b['date'] as int?) ?? 0));
+                                final logs = List<Map<String, Object?>>.from(snapshot.data!)..sort((a, b) => ((a['date'] as int?) ?? 0).compareTo((b['date'] as int?) ?? 0));
                                 final weights = logs.map((m) => (m['weight'] as num?)?.toDouble() ?? 0.0).toList();
                                 final dates = logs.map((m) => DateTime.fromMillisecondsSinceEpoch(m['date'] as int)).toList();
                                 return SizedBox(
@@ -523,10 +523,14 @@ class _ProgressScreenState extends State<ProgressScreen> {
       await DatabaseHelper.instance.insertCalorie({
         'date': day.millisecondsSinceEpoch,
         'calories': 1500 + i * 100,
+        'name': 'Sample Food ${i + 1}',
       });
       await DatabaseHelper.instance.insertWorkout({
         'date': day.millisecondsSinceEpoch,
         'minutes': 30 + i * 5,
+        'title': 'Sample Workout ${i + 1}',
+        'type': 'Cardio',
+        'calories': 200 + i * 20,
       });
       await DatabaseHelper.instance.insertWeightLog({
         'date': day.millisecondsSinceEpoch,
